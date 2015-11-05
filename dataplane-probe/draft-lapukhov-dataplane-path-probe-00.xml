@@ -1,0 +1,423 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE rfc SYSTEM "rfc2629.dtd"[]>
+<?rfc toc="yes"?>
+<?rfc compact="yes"?>
+<?rfc subcompact="no"?>
+<?rfc symrefs="yes" ?>
+<rfc category="std" ipr="trust200902" docName="draft-lapukhov-dataplane-probe-00" obsoletes="" updates="" submissionType="IETF" xml:lang="en">
+  <front>
+    <title abbrev="draft-lapukhov-dataplane-probe">Data-plane probe for in-band telemetry collection</title>
+    <author initials="P." surname="Lapukhov" fullname="Petr Lapukhov">
+      <organization>Facebook</organization>
+      <address>
+        <postal>
+          <street>1 Hacker Way</street>
+          <city>Menlo Park</city>
+          <region>CA</region>
+          <code>94025</code>
+          <country>US</country>
+        </postal>
+        <email>petr@fb.com</email>
+      </address>
+    </author>       
+    <date year="2015"/>
+    <area>ops</area>
+    <workgroup>opsawg</workgroup>
+    <keyword>Internet Draft</keyword>
+    <keyword>ping</keyword>
+    <keyword>traceroute</keyword>
+    <keyword>inband</keyword>
+    <keyword>telemetry</keyword>
+    <abstract>
+      <t>
+        Detecting and isolation network faults in IP networks has been traditionally done using tools like ping and traceroute (see <xref target="RFC7276"/>) or more complex systems built on similar concepts of active probing and path tracing. While using active synthetic probes is proven to be helpful in detecting data-plane faults, isolating fault location is proven to be much harder problem, especially in diverse networks with multiple data-planes (e.g. IP and MPLS). Moreover, the existing end-to-end tools do not support functionality beyond dealing with packet loss - for example, they are hardly useful for detecting and reporting transient network congestions.
+      </t>
+      <t>
+        Recent development in network silicon allows for more sophisticated data-plane functionality, that promises to greatly improve the isolation capabilities. For example, it become possible to embed transit device counter values and in the packet payload as it crossed the device. An instance of such counter could be queue depth on the egress port taken by the packet. Combined with device-id embedded in the same packet this would allow for precisely pin-pointing the congestion spot in the network.
+      </t>
+      <t>
+        This document proposes a standard format for embedding telemetry in the active probing packets, i.e. packets designated for testing the network, while not carrying application traffic. The active probes could be conveyed over multiple protocol, for example ICMP, UDP or TCP. In addition, the document provides recommendations on handling such probes by devices that do not support the required data-plane functionality.
+      </t>
+    </abstract>
+  </front>
+  <middle>
+    <section title="Introduction" anchor="intro" toc="default">
+      <t>
+        Detecting and isolating a fault in IP networks may involve multiple tools and approaches, but by far the two most popular utilities used by operators are ping and traceroute. The ping utility provides the basic end-to-end connectivity check by sending a special ICMP packet. There are other variants of ping that work using ICMP, TCP or UDP probes, but may require a special responder application (for UDP) on the other end of the probed connection.
+      </t>
+      <t>
+        The active probing approach has its limitations. Firstly, it operates end-to-end, and thus it is impossible to tell where in the path the fault has happened from simply observing the packet loss ratios. Secondly, in Equal-Cost Multipath (ECMP) scenarios one needs extra efforts to fully exercise all possible paths connecting two end-points.
+      </t>
+      <t>
+        The traceroute utility has multiple variants as well - UDP, ICMP and TCP based, for instance, and special variant for MPLS LSP testing. Practically all variants follow the same model of operations - varying TTL field setting in outgoing probes and analyzing the returned ICMP unreachable messages. It does allow isolating the fault down to the IP hop that is losing packets, but has its own limitations. As with the ping utility, it becomes complicated to explore all possible ECMP paths in the network. This is especially problematic in large data-center network using Clos topology. Next, many network devices limit the rate of outgoing ICMP messages as well as rate of "exception" packets "punted" to the control plane processor. This puts a limit the packet rate that the traceroute can probe a given hop with, and hence impacts the resolution and time to isolate a fault. Lastly, the treatment for the traceroute packets differs significantly from the packets that take regular data-path: the latter are normally not redirected to the control plane processor and handled purely in the data-plane hardware.
+      </t>
+      <t>
+        Evolution of network hardware lead to development of network processors capable of packet handling beyond basic forwarding and simple header modifications. Of special interest is the ability to embed certain network element's state information in the transit packet's body. For instance, this could be recording the transit device's name, ingress and egress port identifiers, queue depths, timestamps and so on. Using this functionality, it become trivial to trace a probe's path in the network, as well as record transit device characteristics. Thus, one may build a tool that combines useful properties of ping and traceroute using a single packet flight throuh network, without the constraints of the control plane processing. To aid in development of such tooling, this document defines a format for embedding telemetry information in the body of active probing packets. 
+      </t>
+    </section>
+    <section title="Data plane probe">
+      <t>
+        This section defines the structure of the active data-plane probe packets. 
+      </t>
+      <section title="Probe transport" toc="default">
+        <t>
+          Different protocols could be used to collect telemetry information from the network elements. This document assumes using either ICMP or UDP packets for probing, but does not prescribe any specific modes of operations for either of the protocols. For ICMP, the document assumes use of the "ICMP Echo" message, which means that the receiver will reflect back in ICMP Echo Reply the information collected by the ICMP Echo packet as it traverses the network. For UDP probes, a receiving application listening on a pre-defined port is needed to collect and possibly echo back the information embedded in the probe. 
+        </t>
+        <t>
+          An argument could be made that using UDP or ICMP does not allow for testing the same level of processing that, say, a TCP packet would experience in the network. This mainly applies to specifics such as packet hashing, policy-routing and access-control rules processing. However, the the major goal of the proposed approach is detecting network issues related to forwarding (e.g. random packet discards, or congestions), not policy violations.
+        </t>
+        <t>
+          Another possible limitation is the size of the probe packet. Some data-plane faults may affect packets of a given size only. In this case, the data-plane probe may not be able to detect such issues, given the requirement to pre-allocated the storage in the packet body.
+        </t>
+      </section>    
+      <section title="Probe structure" toc="default">
+        <t>
+          The sender is responsible for building a packet sized largely enough to hold information to be added by the network elements. At the same time, the probe must not exceed the minimum MTU allowed in the probed path. It is assumed that the sender either knows the needed MTU beforehand, or relies on well-known mechanisms for path MTU discovery. After adding the mandatory protocol headers (e.g. ICMP or UDP header), the packet payload if built according to the following layout:
+        </t>
+
+        <figure title="Probe layout" anchor="probe_layout" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
++---------------------------------------------------------+
+| Header                                                  |
++---------------------------------------------------------+
+| Telemetry Record template                               |
++---------------------------------------------------------+
+| Placeholder for telemetry record 1                      |
++---------------------------------------------------------+
+| Placeholder for telemetry record 2                      |
++---------------------------------------------------------+
+.                                                         .
+.                                                         .
+.                                                         .
++---------------------------------------------------------+
+| Placeholder for telemetry record N                      |
++---------------------------------------------------------+
+          </artwork>
+        </figure>
+        <t>
+          Notice that all record placeholders have equal size, defined by the telemetry record template, and that space for those must be pre-allocated by the sender of the packet. Every record corresponds to a single network element on the path from sender to receiver of the packet.
+        </t>
+      </section>
+      <section title="Header Format" toc="default">
+        <t>
+          The probe payload starts with a fixed-size header. The purpose of the header is identifying the probe packet, and encoding basic information shared by all telemetry records. 
+        </t>
+        <figure title="Header Format" anchor="header_format" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                         Probe Marker (1)                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+    
+|                         Probe Marker (2)                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|         Version Number        |       Must Be Zero          |O|
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                        Sender's Handle                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                        Sequence Number                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                          Write Offset                         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+            
+          </artwork>
+        </figure>
+        <t> 
+          <list style="format (%d)">
+            <t>
+              The "Probe Marker" fields are two arbitrary 32-bit value that could be used by the network processor to recognize the probe packet. These field should be interpreted as unsigned integer values, stored in network byte order For example, a network element may be configured to recognize a UDP packet destined to port 31337 and having 0xDEAD 0xBEEF values in "Probe Marker" field as an active probe, and treat it respectively. 
+            </t>
+            <t>
+              "Version Number" is currently set to 1.
+            </t>
+            <t>
+              The "Global Flags" filed is 8 bits, and currently defines only the "Overflow" (O-bit) defined (least significant bit). This bit is set by the network element that could not write its telemetry data when there is no more room left in the packet. 
+            </t>
+            <t>
+              The "Sender's Handle" field is set by the sender to allow the receiver to identify a particular sender. Along with "Sequence Number" it allows for simple tracking of packet order and loss in the network.
+            </t>
+            <t>
+              The "Write Offset" field must be initially set to point to the first octet after the "Record Template" field. It must be incremented by every network element that adds a telemetry record, without overflowing the storage. This simplifies the work for the next network elements - it just need to parse the template and then add the data at the "Write Offset".
+            </t>
+          </list>
+        </t>
+      </section>    
+      <section title="Telemetry Record Template" toc="default">
+        <t>
+          The following figure defines the "Record Template" part of the header. This template describes a telemetry data record that network elements are required to fill in. The template contains Type-Length fields that tell the network elements of the telemetry data to record in the packet. The most significant bit in the "Type" field must be set to zero.
+        </t>
+          <figure title="Record Template" anchor="record_template" suppress-title="false" align="left" alt="" width="" height="">
+            <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
+|      TL record count (N)      |          Must Be Zero         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+   
+|0|           Type 1            |            Length 1           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|0|           Type 2            |            Length 2           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+.                                                               .
+.                                                               .
+.                                                               .
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|0|           Type N            |           Length N            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+          
+            </artwork>
+          </figure> 
+      </section>
+      <section title="Telemetry Record">
+        <t>
+          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record following the structure defined in the "Record Template". The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet. The most significant bit in the type field ("S-bit") must be set to "1" if the network element was able to understand and record the requested telemetry type. That bit must be set to zero otherwise, along with the contents of the "Value" field. The length field counts the TLV field length including the "Type" and "Length" fields themselves.
+        </t>
+        <figure title="Telemetry Record Format" anchor="telemetry_record" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">        
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|           Type 1            |           Length 1            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+.                                                               .
+.                             Value 1                           .
+.                                                               .
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|           Type 2            |            Length 2           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+.                                                               .
+.                             Value 2                           .
+.                                                               .
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+.                                                               .
+.                                                               .
+.                                                               .
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|           Type N            |             Length N          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+.                                                               .
+.                             Value N                           .
+.                                                               .
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+          
+          </artwork>
+        </figure>
+      </section>
+    </section>
+    <section title="Telemetry Record Types" toc="default">
+      <t>
+        This section defines some of the telemetry record types that could be supported by the network elements. 
+      </t>
+      <section title="Device Identifier">
+        <t>
+          This is used to identify the device reporting telemetry information. The ID field if 128-bit long, to allow for encoding an IPv6 address, for example. However, this document does not prescribe any specific identifier format.
+        </t>
+        <figure title="Device Identifier" anchor="device_id" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|   Type = 1 (Device ID)      |           Length =  20        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           Device ID (1)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           Device ID (2)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           Device ID (3)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           Device ID (4)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+          </artwork>
+        </figure>
+      </section>
+      <section title="Timestamp">
+        <t>
+          This telemetry record defines the time that the packet has entered and left the device at, in UTC. The "entering" time is recorded when the L2 header enters the processing pipeline. The "exit" time is recorded when the network elements starts serializing L2 header on egress port.
+        </t>
+        <figure title="Timestamp" anchor="time_stamp" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|   Type = 10 (Timestamp)     |           Length =  28        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       Receive Seconds                         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                     Receive Microseconds                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Receive Nanoseconds                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                         Send Seconds                          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       Send Microseconds                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                        Send Nanoseconds                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+          </artwork>
+        </figure>
+      </section>
+      <section title="Queueing Delay">
+        <t>
+          Define the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. 
+        </t>
+        <figure title="Queueing Delay" anchor="queueing_delay" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|  Type = 11 (Queueing Delay) |           Length =  16        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                            Seconds                            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                          Microseconds                         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                          Nanoseconds                          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+          </artwork>
+        </figure>
+      </section> 
+      <section title="Ingress/Egress Port IDs">
+        <t>
+          This record stores ingress and egress physical ports used to receive and send packet respectively. Here physical port means a unit with actual MAC and PHY devices associated - not any logical subdivision based, for example, on protocol level tags (e.g. VLAN). The port identifiers are opaque, and defined as 64-bit entries.
+        </t>
+        <figure title="Ingress/Egress Port IDs" anchor="ingress_egress_ports" suppress-title="false" align="left" alt="" width="" height="">
+          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|   Type = 12 (Port IDs)      |           Length =  20        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Ingress Port ID (1)                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Ingress Port ID (1)                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Egress Port ID (1)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Egress Port ID (2)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+            
+          </artwork>
+        </figure>
+      </section> 
+      <section title="Forwarding Information">
+        <t>
+          Records defined in this section require the network element to store forwarding information that was used to direct the packet to the next-hop. In the network that uses multiple forwarding plane implementations (e.g. IP and MPLS) the originator of the probe is required to populate the record template with all kinds of forwarding information it expects in the path. The network elements then populate the entries they know about, e.g. in IPv4-only network the "IPv6 Route" record will be left unfilled, and so will be "MPLS Route".
+        </t>
+        <section title="IPv6 Route">
+          <t>
+            This record stores the IPv6 route that has been used for packet forwarding. If not used, then S-bit is set to zero, along with the value field.
+          </t>
+          <figure title="IPv6 Route" anchor="forwarding_information_ipv6_route" suppress-title="false" align="left" alt="" width="" height="">
+            <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|   Type = 20 (IPv6 Route)    |           Length =  24        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|      ECMP group size    |  ECMP group index   | Prefix Length |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       IPv6 Address (1)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       IPv6 Address (2)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
+|                       IPv6 Address (3)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+   
+|                       IPv6 Address (4)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+       
+            </artwork>
+          </figure>
+        </section>
+        <section title="IPv4 Route">
+          <t>
+            This record stores the IPv4 route that has been used for packet forwarding. If not used, then S-bit is set to zero, along with the value field.
+          </t>
+          <figure title="IPv4 Route" anchor="forwarding_information_ipv4_route" suppress-title="false" align="left" alt="" width="" height="">
+            <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|   Type = 21 (IPv4 Route)    |           Length =  12        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     ECMP group size   |  ECMP group index     | Prefix Length | 
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       IPv4 Address                            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+      
+            </artwork>
+          </figure>
+        </section>   
+        <section title="MPLS Route">
+          <t>
+            This record stores the MPLS label mapping that has been used for packet forwarding. It is possible that inbound or outbound label set set to zero, if it was not used (e.g. on ingress or egress of the domain). At the edge of IP2MPLS or MPLS2IP domain it is expected that the device would fill in the "MPLS Route" telemetry record along with the corresponding "IPv6 Route" or "IPv4 Route" records.
+          </t>
+          <figure title="MPLS Route" anchor="forwarding_information_mpls_route" suppress-title="false" align="left" alt="" width="" height="">
+            <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|S|   Type = 22 (MPLS Route)    |           Length =  16        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|   Operation   |      ECMP group size    |  ECMP group index   |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|      Must Be Zero     |         Incoming MPLS Label           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|      Must Be Zero     |         Outgoing MPLS Label           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+            </artwork>
+          </figure>
+          <t> There are three MPLS operations defined
+            <list>
+              <t> "1" - Push </t>
+              <t> "2" - Pop </t>
+              <t> "3" - Swap </t>
+            </list>
+          </t>
+        </section>              
+      </section>  
+    </section>
+    <section title="Processing Probe Packet" toc="default">
+      <section title="Detecting a probe" toc="default">
+        <t>
+          Since the probe looks like a regular UDP/ICMP packet, the data-plane hardware needs a way to recognize it for special processing. This document does not prescribe a specific way to do that. For example, classification could be done simple based on the destination UDP port, or using more complex pattern matching techniques, e.g matching on protcool "ICMP" and the contents of "Probe Marker" field.
+        </t>
+      </section>      
+    </section>    
+    <section title="Non-Capable Devices" toc="default">
+      <t>
+        Non-capable devices are those that could not process the data-plane probe in the hardware. There could be two kind of such devices: those that can still process it via the control-plane complex, and those that can not. The control-plane processing should be triggered by use of the router-alert option for IPv4 of IPv6 packets (see <xref target="RFC2113"/> or <xref target="RFC2711"/>) added by the originator of the probe. A control-plane capable device is expected to interpret and fill-in as much telemetry-record data as it possibly could, given the limited abilities. 
+      </t>
+      <t>
+        The network element that are not capable of processing the data-plane probe are expected to perform regular packet forwarding according to its state and configuration. If a network element receives a packet with the router-alert option set, but has no special configuration to detect such probe, it should process it according to <xref target="RFC6398"/>. 
+      </t>
+    </section>
+    <section title="Handling data-plane probes in MPLS domain" toc="default">
+      <t>
+        In general, the payload of an MPLS packet is opaque to the network element. However, in most cases the network element still performs a lookup beyond the MPLS label stack to peek information such as transport protocol port number. It may be possible to perform data-plane probe classification in the same manner, additionally using the "Probe Marker" to distinguish the probe packets.
+      </t>
+      <t>
+        In accordance to <xref target="RFC6178"/> Label Edge Routers (LERs) are required not to impose an MPLS router-alert label for packets carrying the router-alert option. It may be beneficial to enable such translation, so that an end-to-end validation could be performed if a control-plane capable MPLS network element is present on the probe's path.
+      </t>
+    </section>    
+    <section title="Multi-chip device considerations" toc="default">
+      <t>
+        TBD
+      </t>
+    </section>      
+    <section title="IANA Considerations" toc="default">
+      <t>
+        None
+      </t>
+    </section>
+  </middle>
+  <back>
+    <references title="Normative References">
+      <?rfc include="reference.RFC.2113.xml"?>
+      <?rfc include="reference.RFC.2711.xml"?>
+      <?rfc include="reference.RFC.6398.xml"?>
+      <?rfc include="reference.RFC.6178.xml"?>
+    </references>
+    <references title="Informative References">
+      <?rfc include="reference.RFC.7276.xml"?>
+    </references> 
+  </back>
+</rfc>
