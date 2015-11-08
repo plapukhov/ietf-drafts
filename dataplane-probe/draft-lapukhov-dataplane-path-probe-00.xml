@@ -33,17 +33,17 @@
         Detecting and isolation network faults in IP networks has been traditionally done using tools like ping and traceroute (see <xref target="RFC7276"/>) or more complex systems built on similar concepts of active probing and path tracing. While using active synthetic probes is proven to be helpful in detecting data-plane faults, isolating fault location is proven to be much harder problem, especially in diverse networks with multiple data-planes (e.g. IP and MPLS). Moreover, the existing end-to-end tools do not support functionality beyond dealing with packet loss - for example, they are hardly useful for detecting and reporting transient network congestions.
       </t>
       <t>
-        Recent development in network silicon allows for more sophisticated data-plane functionality, that promises to greatly improve the isolation capabilities. For example, it become possible to embed transit device counter values and in the packet payload as it crossed the device. An instance of such counter could be queue depth on the egress port taken by the packet. Combined with device-id embedded in the same packet this would allow for precisely pin-pointing the congestion spot in the network.
+        Recent development in network silicon enables more sophisticated data-plane functionality, that promises great improvement of the isolation capabilities. For example, it become possible to embed a partial snapshot of the transit device's state the packet payload as it crossed the device. An example of such state could be queue depth on the egress port taken by the packet. Combined with device identifiers embedded in the same packet this would allow for precisely pin-pointing the congestion spot in the network.
       </t>
       <t>
-        This document proposes a standard format for embedding telemetry in the active probing packets, i.e. packets designated for testing the network, while not carrying application traffic. The active probes could be conveyed over multiple protocol, for example ICMP, UDP or TCP. In addition, the document provides recommendations on handling such probes by devices that do not support the required data-plane functionality.
+        This document proposes a standard format for embedding telemetry in the active UDP-based probing packets, i.e. packets designated for testing the network, while not carrying application traffic. The active probes could be conveyed over multiple protocol, for example ICMP, UDP or TCP, but this document specifically focuses on UDP, given its simple semantics. In addition, the document provides recommendations on handling the active probes by devices that do not support the required data-plane functionality.
       </t>
     </abstract>
   </front>
   <middle>
     <section title="Introduction" anchor="intro" toc="default">
       <t>
-        Detecting and isolating a fault in IP networks may involve multiple tools and approaches, but by far the two most popular utilities used by operators are ping and traceroute. The ping utility provides the basic end-to-end connectivity check by sending a special ICMP packet. There are other variants of ping that work using ICMP, TCP or UDP probes, but may require a special responder application (for UDP) on the other end of the probed connection.
+        Detecting and isolating a fault in IP networks may involve multiple tools and approaches, but by far the two most popular utilities used by operators are ping and traceroute. The ping utility provides the basic end-to-end connectivity check by sending a special ICMP packet. There are other variants of ping that work using TCP or UDP probes, but may require a special responder application (for UDP) on the other end of the probed connection.
       </t>
       <t>
         The active probing approach has its limitations. Firstly, it operates end-to-end, and thus it is impossible to tell where in the path the fault has happened from simply observing the packet loss ratios. Secondly, in Equal-Cost Multipath (ECMP) scenarios one needs extra efforts to fully exercise all possible paths connecting two end-points.
@@ -61,20 +61,13 @@
       </t>
       <section title="Probe transport" toc="default">
         <t>
-          Different protocols could be used to collect telemetry information from the network elements. This document assumes using either ICMP or UDP packets for probing, but does not prescribe any specific modes of operations for either of the protocols. For ICMP, the document assumes use of the "ICMP Echo" message, which means that the receiver will reflect back in ICMP Echo Reply the information collected by the ICMP Echo packet as it traverses the network. For UDP probes, a receiving application listening on a pre-defined port is needed to collect and possibly echo back the information embedded in the probe. 
-        </t>
-        <t>
-          An argument could be made that using UDP or ICMP does not allow for testing the same level of processing that, say, a TCP packet would experience in the network. This mainly applies to specifics such as packet hashing, policy-routing and access-control rules processing. However, the the major goal of the proposed approach is detecting network issues related to forwarding (e.g. random packet discards, or congestions), not policy violations.
-        </t>
-        <t>
-          Another possible limitation is the size of the probe packet. Some data-plane faults may affect packets of a given size only. In this case, the data-plane probe may not be able to detect such issues, given the requirement to pre-allocated the storage in the packet body.
+          This document assumes the use of IP/UDP for data-plane probing (either IPv4 or IPv6 could be used). A receiving application may listen on a pre-defined UDP port to collect and possibly echo back the information embedded in the probe. A potential limitation to this methodology is the size of the probe packet. Some data-plane faults may affect packets of a given size only. In this case, the data-plane probe may not be able to detect such issues, given the requirement to pre-allocate storage in the packet body.
         </t>
       </section>    
       <section title="Probe structure" toc="default">
         <t>
-          The sender is responsible for building a packet sized largely enough to hold information to be added by the network elements. At the same time, the probe must not exceed the minimum MTU allowed in the probed path. It is assumed that the sender either knows the needed MTU beforehand, or relies on well-known mechanisms for path MTU discovery. After adding the mandatory protocol headers (e.g. ICMP or UDP header), the packet payload if built according to the following layout:
+          The sender is responsible for building a packet sized largely enough to hold information to be added by the network elements. At the same time, the probe must not exceed the minimum MTU allowed in the probed path. It is assumed that the sender either knows the needed MTU beforehand, or relies on well-known mechanisms for path MTU discovery. After adding the mandatory protocol headers, the packet payload if built according to the following layout:
         </t>
-
         <figure title="Probe layout" anchor="probe_layout" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
 +---------------------------------------------------------+
@@ -95,7 +88,7 @@
           </artwork>
         </figure>
         <t>
-          Notice that all record placeholders have equal size, defined by the telemetry record template, and that space for those must be pre-allocated by the sender of the packet. Every record corresponds to a single network element on the path from sender to receiver of the packet.
+          Notice that all record placeholders have equal size, prescribed by the telemetry record template, and that space for those must be pre-allocated by the sender of the packet. Every record corresponds to a single network element on the path from sender to receiver of the packet.
         </t>
       </section>
       <section title="Header Format" toc="default">
@@ -111,7 +104,9 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+    
 |                         Probe Marker (2)                      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|         Version Number        |       Must Be Zero          |O|
+|         Version Number        |       Must Be Zero        |S|O|
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|  Message Type |   Hop Limit   |          Must Be Zero         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                        Sender's Handle                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -130,13 +125,25 @@
               "Version Number" is currently set to 1.
             </t>
             <t>
-              The "Global Flags" filed is 8 bits, and currently defines only the "Overflow" (O-bit) defined (least significant bit). This bit is set by the network element that could not write its telemetry data when there is no more room left in the packet. 
+              The "Global Flags" field is 8 bits, and currently defines the following flags:
+              <list>
+                <t> 
+                  "Overflow" (O-bit) (least significant bit). This bit is set by the network element that could not write its telemetry data when there is no more room left in the packet. 
+                </t>
+                <t>
+                  "Sealed" (S-bit). This bit tells the network element to forward the packet as is, without telemetry data embedding, even if it does match the data-plane probe criteria. This could be used to send "realistic" probes of arbitrary size after the network path associated with the combinationo of source/destination IP addresses and ports has been previously established. The network elements must not attempt to inspect the "Telemetry Record Template" field for "sealed" probes.
+                </t>
+              </list>
+            </t>
+            <t> The "Message Type" field value could be either "1" - "Probe" or "2" - "Probe Reply"</t>
+            <t>
+              "Hop Limit" is defined only for "Message Type" of "1" ("Probe"). For "Probe Reply" the "Hop Limit" field must be set to zero. This field is treated as an integer value and decremented by every network element in the path as "Probe" propagates. See the <xref target="loopback_mode"/> section on the intended use of the field.
             </t>
             <t>
-              The "Sender's Handle" field is set by the sender to allow the receiver to identify a particular sender. Along with "Sequence Number" it allows for simple tracking of packet order and loss in the network.
+              The "Sender's Handle" field is set by the sender to allow the receiver to identify a particular originator of probe packets. Along with "Sequence Number" it allows for simple tracking of packet order and loss in the network.
             </t>
             <t>
-              The "Write Offset" field must be initially set to point to the first octet after the "Record Template" field. It must be incremented by every network element that adds a telemetry record, without overflowing the storage. This simplifies the work for the next network elements - it just need to parse the template and then add the data at the "Write Offset".
+              The "Write Offset" field specifies the offset for the next telemetry record to be written in the probe packet body. It counts from the start of the packet's body and must be initially set to point to the first octet after the "Record Template" field. It must be incremented by every network element that adds a telemetry record, without overflowing the storage. This simplifies the work for the next network elements - it just need to parse the template and then add the data at the "Write Offset".
             </t>
           </list>
         </t>
@@ -167,7 +174,10 @@
       </section>
       <section title="Telemetry Record">
         <t>
-          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record following the structure defined in the "Record Template". The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet. The most significant bit in the type field ("S-bit") must be set to "1" if the network element was able to understand and record the requested telemetry type. That bit must be set to zero otherwise, along with the contents of the "Value" field. The length field counts the TLV field length including the "Type" and "Length" fields themselves.
+          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record following the structure defined in the "Record Template" to the probe packet. The new record must be inserted at the "Write Offset" position in the packet payload, with the "Write Offset" subsequenly incremented by the size of the new record. The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet. The most significant bit in the type field ("S-bit") must be set to "1" if the network element was able to understand and record the requested telemetry type. That bit must be set to zero otherwise, along with the contents of the "Value" field. The length field counts the TLV field length including the "Type" and "Length" fields themselves.
+        </t>
+        <t>
+          If writing a new telemetry record to the packet body would cause it to exceed the packet size, then the operation must be skipped, and the "O-bit" must be set to "1" in the probe header.
         </t>
         <figure title="Telemetry Record Format" anchor="telemetry_record" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">        
@@ -212,22 +222,18 @@
       </t>
       <section title="Device Identifier">
         <t>
-          This is used to identify the device reporting telemetry information. The ID field if 128-bit long, to allow for encoding an IPv6 address, for example. However, this document does not prescribe any specific identifier format.
+          This is used to identify the device reporting telemetry information. This document does not prescribe any specific identifier format.
         </t>
         <figure title="Device Identifier" anchor="device_id" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 1 (Device ID)      |           Length =  20        |
+|S|   Type = 1 (Device ID)      |           Length =  12        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                           Device ID (1)                       |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                           Device ID (2)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                           Device ID (3)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                           Device ID (4)                       |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
           </artwork>
         </figure>
@@ -260,7 +266,7 @@
       </section>
       <section title="Queueing Delay">
         <t>
-          Define the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. 
+          Define the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. In case of the cut-through switching operation this must be set to zero.
         </t>
         <figure title="Queueing Delay" anchor="queueing_delay" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
@@ -280,23 +286,19 @@
       </section> 
       <section title="Ingress/Egress Port IDs">
         <t>
-          This record stores ingress and egress physical ports used to receive and send packet respectively. Here physical port means a unit with actual MAC and PHY devices associated - not any logical subdivision based, for example, on protocol level tags (e.g. VLAN). The port identifiers are opaque, and defined as 64-bit entries.
+          This record stores ingress and egress physical ports used to receive and send packet respectively. Here physical port means a unit with actual MAC and PHY devices associated - not any logical subdivision based, for example, on protocol level tags (e.g. VLAN). The port identifiers are opaque, and defined as 32-bit entries.
         </t>
         <figure title="Ingress/Egress Port IDs" anchor="ingress_egress_ports" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 12 (Port IDs)      |           Length =  20        |
+|S|   Type = 12 (Port IDs)      |           Length =  12        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Ingress Port ID (1)                      |
+|                        Ingress Port ID                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Ingress Port ID (1)                      |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Egress Port ID (1)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Egress Port ID (2)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+            
+|                         Egress Port ID                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+           
           </artwork>
         </figure>
       </section> 
@@ -375,29 +377,48 @@
         </section>              
       </section>  
     </section>
+    <section title="Operating in loopback mode" anchor="loopback_mode" toc="default">
+      <t>
+        In "loopback" mode the flow of probes is "turned backed" at a given network element. The network element that "turns" packets around is identified using the "Hop Limit" field. The network element that receives a "Probe" type packet having "Hop Limit" value of "1" is required to perform the following:
+        <list>
+          <t>
+            Change the "Message Type" field to "Probe Reply" and set the "Hop Limit" to zero.
+          </t>
+          <t>
+            Swap the destination/source addresses and port values in the IP/UDP headers of the probe packet.
+          </t>
+          <t>
+            Add a telemetry record as required using the newly build IP/UDP headers to determine forwarding information.
+          </t>
+        </list>
+      </t>
+      <t>
+        This way, the original probe is routed back to originator. Notice that the return path may be different from the path that the original probe has taken. This path will be recorded by the network elements as the reply is transported back to the sender. Using this technique one may progressively test a path until its breaking point. Unlike the traditional traceroute utility, however, the returning packets are the original probes, not the ICMP messages.
+      </t>
+    </section>    
     <section title="Processing Probe Packet" toc="default">
       <section title="Detecting a probe" toc="default">
         <t>
-          Since the probe looks like a regular UDP/ICMP packet, the data-plane hardware needs a way to recognize it for special processing. This document does not prescribe a specific way to do that. For example, classification could be done simple based on the destination UDP port, or using more complex pattern matching techniques, e.g matching on protcool "ICMP" and the contents of "Probe Marker" field.
+          Since the probe looks like a regular UDP packet, the data-plane hardware needs a way to recognize it for special processing. This document does not prescribe a specific way to do that. For example, classification could be done simple based on the destination UDP port, or using more complex pattern matching techniques, e.g matching on the contents of "Probe Marker" field.
         </t>
       </section>      
     </section>    
     <section title="Non-Capable Devices" toc="default">
       <t>
-        Non-capable devices are those that could not process the data-plane probe in the hardware. There could be two kind of such devices: those that can still process it via the control-plane complex, and those that can not. The control-plane processing should be triggered by use of the router-alert option for IPv4 of IPv6 packets (see <xref target="RFC2113"/> or <xref target="RFC2711"/>) added by the originator of the probe. A control-plane capable device is expected to interpret and fill-in as much telemetry-record data as it possibly could, given the limited abilities. 
+        The non-capable devices are those that could not process the data-plane probe in the hardware. There could be two kind of such devices: those that can still process it via the control-plane software, and those that can not. The control-plane processing should be triggered by use of the "Router-Alert" option for IPv4 of IPv6 packets (see <xref target="RFC2113"/> or <xref target="RFC2711"/>) added by the originator of the probe. A control-plane capable device is expected to interpret and fill-in as much telemetry-record data as it possibly could, given the limited abilities. 
       </t>
       <t>
-        The network element that are not capable of processing the data-plane probe are expected to perform regular packet forwarding according to its state and configuration. If a network element receives a packet with the router-alert option set, but has no special configuration to detect such probe, it should process it according to <xref target="RFC6398"/>. 
+        The network elements that are not capable of processing the data-plane probe are expected to perform regular packet forwarding according to its state and configuration. If a network element receives a packet with the router-alert option set, but has no special configuration to detect such probes, it should process it according to <xref target="RFC6398"/>. Absensce of router alert option leaves the non dataplane-capable devices with the only option of processing the probe using traditional forwarindg.
       </t>
     </section>
     <section title="Handling data-plane probes in MPLS domain" toc="default">
       <t>
-        In general, the payload of an MPLS packet is opaque to the network element. However, in most cases the network element still performs a lookup beyond the MPLS label stack to peek information such as transport protocol port number. It may be possible to perform data-plane probe classification in the same manner, additionally using the "Probe Marker" to distinguish the probe packets.
+        In general, the payload of an MPLS packet is opaque to the network element. However, in most cases the network elements still perform a lookup beyond the MPLS label stack to peek information such as transport protocol port number. It may be possible to perform data-plane probe classification in the same manner, additionally using the "Probe Marker" to distinguish the probe packets.
       </t>
       <t>
         In accordance to <xref target="RFC6178"/> Label Edge Routers (LERs) are required not to impose an MPLS router-alert label for packets carrying the router-alert option. It may be beneficial to enable such translation, so that an end-to-end validation could be performed if a control-plane capable MPLS network element is present on the probe's path.
       </t>
-    </section>    
+    </section>         
     <section title="Multi-chip device considerations" toc="default">
       <t>
         TBD
