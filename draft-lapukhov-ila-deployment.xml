@@ -1,0 +1,695 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE rfc SYSTEM "rfc2629.dtd"[]>
+<?rfc toc="yes"?>
+<?rfc compact="yes"?>
+<?rfc subcompact="no"?>
+<?rfc symrefs="yes" ?>
+<rfc category="info" ipr="trust200902" docName="draft-lapukhov-ila-deployment-00" obsoletes="" updates="" submissionType="IETF" xml:lang="en">
+  <front>
+    <title abbrev="draft-lapukhov-ila-deployment">Deploying Identifier-Locator Addressing (ILA) in data-center</title>      
+    <author initials="P." surname="Lapukhov" fullname="Petr Lapukhov">
+      <organization>Facebook</organization>
+      <address>
+        <postal>
+          <street>1 Hacker Way</street>
+          <city>Menlo Park</city>
+          <region>CA</region>
+          <code>94025</code>
+          <country>US</country>
+        </postal>
+        <email>petr@fb.com</email>
+      </address>
+    </author>         
+    <date year="2016"/>
+    <area>Routing</area>
+    <keyword>Internet Draft</keyword>
+    <keyword>BGP</keyword>
+    <keyword>ILA</keyword>
+    <abstract>
+      <t>
+        Identifier-Locator Addressing defined in <xref target="I-D.herbert-nvo3-ila"/> proposes using locator-identifier split in IPv6 address to implement workload mobility and network virtualization. This document describes, at a high level, how ILA can be deployed in a data-center. 
+      </t>
+    </abstract>
+  </front>
+  <middle>
+    <section title="Introduction" anchor="intro" toc="default">
+      <t>
+        This document provides general guidelines on building an ILA-enabled data-center using <xref target="RFC4271">BGP</xref> as the protocol for ILA mapping information dissemination. The reader is assumed to be familiar with high-level ILNP architecture defined in <xref target="RFC6740"/> as well as additional concepts from <xref target="I-D.herbert-nvo3-ila"/>. 
+      </t>
+      <t>
+        Full ILA benefit is realized in routed data-center networks, i.e. networks that do not require spanning Layer-2 domains across multiple network devices. The endpoint mobility made possible by ILA is one of the key features brought to the routed network that is was seen as the unique advantage of large Layer-2 domains. Combining ILA with fully routed network designs allows for achieving both the robustness and stability of routed network designs with the flexibility of endpoint mobility. Some practical recommendations for building a fully-routed data-center network could be found in <xref target="I-D.ietf-rtgwg-bgp-routing-large-dc"/> or <xref target="ROUTED-DESIGN"/>. 
+      </t>      
+      <t>
+        While workload mobility could be achieved in routed networks by using "host-route" injection techniques, it has limited applicability, due to high stress put on the underlying routing protocol. The prefix needs to be removed and re-injected and propagated to all network devices every time an address moves.
+      </t>
+      <t>
+        ILA offers an alternative to "encapsulation" approaches for realizing the identifier-locator split. Using simple address rewrites allows for reducing the processing overhead on the hosts. Furthermore, ILA keeps the underlying network fully visible to the applications using ILA addresses, which makes operations and troubleshooting easier.
+      </t>
+    </section>
+    <section title="Terminology" anchor="terminology" toc="default">
+      <t>
+        This section defines the ILA-specific terminology that will be used through the document.
+      </t>
+      <t>
+        <list style="">
+          <t>
+            ILA domain: a collection of ILA hosts and ILA routers that collectively support ILA identifier mobility and network virtualization model. The ILA domain is assigned a single 64-bit IPv6 prefix known as SIR (Standard Identifier Representation, see <xref target="I-D.herbert-nvo3-ila"/>) prefix, which is made known to all hosts and routers in the domain. This prefix is used to build complete 128-bit IPv6 addresses for ILA identifies found in the domain.
+          </t>
+          <t>
+            ILA host: network endpoint that is capable of accepting and originating traffic for ILA addresses using IPv6 packets. The host maintains the its own view of the ILA mapping table called an "ILA cache" and has at least one ILA locator (64-bit prefix) assigned.
+          </t>
+          <t>
+            ILA router: network endpoint that is responsible for two main functions. Firstly, storing and disseminating the ILA mapping information within the ILA domain. Secondly, serving as the gateway between the ILA-domain and non-ILA capable nodes, as well as the gateway for communicating with other ILA domains.
+          </t>
+          <t>
+            ILA cache: partial or complete view of the global ILA mapping table present in ILA host or ILA router. 
+          </t>
+          <t>
+            Regular host: network endpoint that is not aware of ILA addressing structure and does not participate in ILA address processing.
+          </t>
+          <t>
+            Task: the unit of mobility in ILA domain. Each task is assigned an identifier unique within the ILA domain, which follows the task as it changes the hosts and, consequently, the locators. Implementation wise, the task can run within a container or a virtual machine, for example.
+          </t>
+          <t>
+            Tenant: owner of the tasks executed in the shared environment. All tasks that belongs to the same owner could be grouped and addresses together from the same identifier pool, thus creating simple hierarchy in the ILA address space.
+          </t>          
+        </list>
+      </t>
+    </section>
+    <section title="ILA deployment process" toc="default">
+      <t>
+        The ILA domain consists of the following components:
+        <list style="symbols">
+          <t>
+            Routed network that provides reachability among physical hosts, each configured with a /64 prefix (the ILA locator).
+          </t>
+          <t>
+            ILA hosts, each assigned a unique /64 prefix reachable in the network. Each host maintains local via of the ILA mapping table called here as the ILA cache.
+          </t>
+          <t>
+            ILA routers, each injecting the domain's SIR prefix in the routed network and each maintaining the full mapping table for the ILA domain. The routers could be implemented in software, or using specialized hardware appliances.
+          </t>
+          <t>
+            BGP route-reflector nodes that peer with all of the ILA hosts and all of the ILA routers within the domain for the purpose of mapping information dissemination.
+          </t>
+        </list>
+      </t>      
+      <t>
+        Deploying ILA requires multiple logical steps:
+        <list style="symbols">
+          <t>
+            Preparing the network. Assigning locator addressing to the servers in the data-center network and providing routed interconnection among the locator prefixes. 
+          </t>
+          <t>
+            Configuring ILA hosts and ILA routers. Each ILA domain requires a set of ILA routers to facilitate mapping function and provide connectivity to other ILA domains and the Internet. Each ILA domain is assigned a /64 SIR prefix, which scopes all identifiers in the domain. All ILA hosts and ILA routers within a domain are aware of the SIR prefix of this domain.
+          </t>
+          <t>
+            Setting up ILA control plane. Configuring the BGP mesh for mapping information dissemination within the ILA domain and injecting the SIR prefix into routed network from the ILA routers to facilitate communications among the ILA domain and from / to the Internet. See <xref target="I-D.lapukhov-bgp-ila-afi"/> for definition of corresponding BGP extension.
+          </t>
+          <t>
+            Deploying an address management solution to coordinate allocation of ILA identifiers.
+          </t>
+        </list>
+      </t>      
+    </section>  
+    <section title="Preparing the network" toc="default">
+      <t>
+        This section provides overview of the network-related configuration needed for ILA.
+      </t>
+      <section title="Data-center network topology" toc="default" anchor="dc_topology">
+        <t>
+          For ease of reference, this document adopts the Clos topology described in <xref target="I-D.ietf-rtgwg-bgp-routing-large-dc"/> along with the terminology developed in that document.
+        </t>
+            <figure title="5-Stage Clos topology" anchor="five-stage-clos" suppress-title="false" align="left" alt="" width="" height="">
+              <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">
+                                     Tier-1                            
+                                    +-----+                            
+         Cluster                    |     |                            
++----------------------------+   +--|     |--+                         
+|                            |   |  +-----+  |                         
+|                    Tier-2  |   |           |   Tier-2                
+|                   +-----+  |   |  +-----+  |  +-----+                
+|     +-------------| DEV |------+--|     |--+--|     |-------------+  
+|     |       +-----|  C  |------+  |     |  +--|     |-----+       |  
+|     |       |     +-----+  |      +-----+     +-----+     |       |  
+|     |       |              |                              |       |  
+|     |       |     +-----+  |      +-----+     +-----+     |       |  
+|     | +-----------| DEV |------+  |     |  +--|     |-----------+ |  
+|     | |     | +---|  D  |------+--|     |--+--|     |---+ |     | |  
+|     | |     | |   +-----+  |   |  +-----+  |  +-----+   | |     | |  
+|     | |     | |            |   |           |            | |     | |  
+|   +-----+ +-----+          |   |  +-----+  |          +-----+ +-----+
+|   | DEV | | DEV |          |   +--|     |--+          |     | |     |
+|   |  A  | |  B  | Tier-3   |      |     |      Tier-3 |     | |     |
+|   +-----+ +-----+          |      +-----+             +-----+ +-----+
+|     | |     | |            |                            | |     | |  
+|     O O     O O            |                            O O     O O  
+|       Servers              |                              Servers    
++----------------------------+                                         
+              </artwork>
+            </figure>
+            <t>
+              The network is partitioned hierarchically in three tiers, with tier numbering starting at the "middle" stage of the Clos network. The "middle" tier is often called as the "spine" of the network.
+            </t>
+            <t>
+              A set of directly connected Tier-2 and Tier-3 devices along with their attached servers will be referred to as a "cluster". 
+            </t>
+            <t>
+              Tier-3 switches that connect the servers, and often referred to as "ToR" (Top of Rack) switches or simply "rack switches". 
+            </t>
+          </section>      
+      <section title="Configuring locator addressing">
+        <t>
+          A mandatory pre-requisite for ILA deployment is enabling IPv6 routing in the network. This could be done using either dual-stack IPv4/IPv6 deployment or IPv6-only deployments. This document assumes the network has been already configured to route IPv6 traffic. See <xref target="I-D.ietf-v6ops-dc-ipv6"/> for operational considerations on deploying IPv6 in the data-center.
+        </t>
+        <t>
+          ILA requires every ILA host to have at least one 64-bit locator assigned. This means that every host (server) in the data-center network needs to have at least one /64 IPv6 prefix configured on one of its interfaces (typically the internal loopback). These /64 prefixes could be either globally routable or unique local. 
+        </t>
+        <t>
+          The use of the globally routable addressing scheme allows for deploying highly scalable hierarchical addressing scheme, and make the locators accessible from the Internet. The figure below illustrates the structure of a globally-routable locator:
+        </t>        
+        <figure>
+          <artwork>
+    <![CDATA[
+|<--------------------- Locator -------------------->|
+|3 bits| N bits        | M1 bits | M2 bits | M3 bits |       64 bits
++------+---------------+---------+---------+---------+----------------------+
+| 001  | Global prefix | Cluster |   Rack  |   Host  |      Identifier      |
++------+---------------+---------+---------+---------+----------------------+
+|<-------------------- 64-bits --------------------->|
+          ]]>         
+          </artwork>
+        </figure>
+        <t>
+          For example, a global /32 prefix (N=29) allows for sub-allocation of 2^32 locators. This sub-allocation could be done hierarchically, mapping to the tiers of network topology. Following the /32 example prefix:          
+          <list>
+            <t>
+              Allocate 256 /64 prefixes per Tier-3 switch (M3 = 8 bits), which allows for up to 256 physical hosts in a rack, with /56 per rack.
+            </t>
+            <t>
+              Assuming 256 Tier-3 switches per cluster, one would allocate /48 per cluster (M2 = 8 bits).
+            </t>
+            <t>
+              This leaves room for 16-bits (64K) cluster per data-center (M1 = 16 bits). This space could be further sub-divided if multiple network fabrics have been deployed.
+            </t>
+          </list>          
+        </t> 
+        <t>
+          The use of unique-local addressing for locators is more limiting in terms of available space, as it only offers 16-bits for sub-allocation. It does, however, have the benefit of ad-hoc allocation. This should work well for smaller deployment, e.g. allocating 10-bits to enumerate Tier-3 switches (physical racks of servers) and 6 bits to enumerate hosts within a rack. For instance, the address structure may look as following, here M1 = 10 bits and M2 = 6 bits.
+        </t>
+        <figure>
+          <artwork>
+    <![CDATA[
+|<----------------- Locator --------------->|
+| 7 bits |1|  40 bits   | M1 bits | M2 bits |          64 bits           |
++--------+-+------------+---------+---------+----------------------------+
+| FC00   |L| Global ID  |  Rack   |   Host  |        Identifier          |
++--------+-+------------+---------+---------+----------------------------+   
+|                       |<---- 16 bits ---->|
+|<--------------- 64-bits ----------------->|
+          ]]>         
+          </artwork>
+        </figure>    
+        <t>
+          In either case, the addressing scheme is hierarchical, allowing for simple route summarization logic and better routing system scaling (see <xref target="RFC2791"/>). This is especially important in case of IPv6, since contemporary data-center network switches have smaller IPv6 lookup tables as compared to IPv4. Route summarization also requires certain network design changes to avoid packet black-holing under link failures. This problem gets more complicated in Clos topologies, and analyzed in more details in <xref target="I-D.ietf-rtgwg-bgp-routing-large-dc"/>.
+        </t>  
+        <t>
+          In greenfield deployments, each ILA host could be assigned the /64 locator prefix prefix during provisioning phase. There are multiple options to accomplish this:
+          <list style="symbols">
+            <t>
+              Assigning static link-local addresses to servers and statically routing /64 prefixes from Tier-3 switches to the servers over those link-local addresses. In this model, the operator would plan and pre-allocate per ILA-host prefixes beforehand, and configure the Tier-3 switches accordingly. From operational risk perspective, persistent routing loops may form due to static routing, if a server is not properly configured. Additionally, if the server is not present while the static route is configured on Tier-3 switch, packets destined to the corresponding /64 prefix will cause the switch to continuously generate IPv6 NDP packets ("gleaning"), which puts extra stress on the device's CPU.
+            </t>
+            <t>
+              The servers may request the /64 prefix using IPv6 Prefix Delegation mechanism as defined in <xref target="RFC3633"/>. This allocation could be made "permanent" by proper DHCPv6 server configuration and ensuring the same prefix is always being delegated to the same server. The Tier-3 switch would act as DHCPv6 relay and will install the corresponding /64 IPv6 route dynamically. This approach addresses both the allocation and the routing problem, but makes the setup potentially more fragile operationally (reliance on additional protocol) and harder to debug (additional process involved).
+            </t>
+            <t>
+              The server may run a routing daemon (e.g. BGP process) and inject the allocated /64 prefix into Tier-3 switch. The address allocation in this case needs to happen by some other means. This is more suitable for ad-hoc ILA testing and small, rapid deployments.
+            </t>
+          </list> 
+          The server itself may use one of the IPv6 addresses in /64 prefix for its own addressing, e.g. for remote access or management purposes. Alternatively, the server may obtain another IPv6 address from a different (non-locator) IPv6 address range allocated for the data-center. The downside of the first approach is that it requires borrowing an ILA identifier for the physical host. This could be the same identifier for each prefix, e.g. &lt;locator&gt;::1, which makes it easy to differentiate from "true" ILA identifiers.
+        </t>
+        <t>
+          Route summarization for the locator prefixes is highly desirable to reduce the stress on the network switches forwarding tables and improve control-plane stability, and need to be implemented at least on Tier-3 switches. In simplest case, the switches could be statically pre-configured with the summary routes. These routes need to agree with the prefixes that are assigned to the servers, especially in the case when dynamic prefix injection is used. As a possible alternative, simple virtual aggregation could be employed, where hosts inject both the specific and the summary route, and installation of corresponding FIB entries is suppressed as per the rules defined in <xref target="RFC6769"/>. The latter approach does not improve the control plane scalability, but solves the issues with packet black-holing in presence of network summarization. It also requires the network hardware support, which may not be present.
+        </t>
+        <t>
+          In retrofitting scenarios, the servers are likely to already have 128-bit IPv6 addresses assigned, allocated from the data-center address space, e.g. by using a single /64 prefix per Tier-3 switch. In this case, the additional locator prefix needs to be assigned in the same way as described above for greenfield deployments. The only difference is that the new prefix and the old server address may be allocated from different IPv6 address ranges.
+        </t>
+      </section>
+    </section>
+    <section title="Deploying ILA routers">
+      <t>
+        ILA routers perform multiple functions within the ILA domain. Firstly, they serve as the centralized store of the identifier-to-mapper information in the domain. The mappings are delivered to the ILA routers as described in <xref target="control_plane"/>. Secondly, the routers act as the gateway between the ILA hosts and non-ILA capable hosts, e.g. the Internet. The ILA hosts will send the packets destined to identifiers they don't have mappings for to the ILA routers initially to perform the ILA mapping resolution, and the hosts outside of the ILA domain will use the ILA routers for all communications with the domain. The ILA routers do not host any ILA identifiers themselves.
+      </t>
+      <section title="Configuration parameters">
+        <t>
+          The ILA routers need the following configured for their operation:
+          <list>
+            <t>
+              Regular, non-anycast 128-bit IPv6 address to connect the ILA router to the data-center network.
+            </t>
+            <t>
+              The /64 SIR prefix for the ILA domain, shared by all ILA routers. This prefix is advertised into the routed data-center network and "intercepts" all traffic destined from hosts outside of ILA domains to the identifiers in the domain. The prefix could be injected in "always-on" fashion, e.g. by using BGP injectors on ILA routers. This couples the ILA router's life-cycle with the prefix injection cycle. Other, more sophisticated schemes are possible, e.g. stopping injecting the prefix based if ILA router's resource utilization gets too high, but discussing their implementation is outside the scope of this document.
+            </t>
+            <t>
+              Control-plane configuration, e.g. the IPv6 addresses of BGP route reflectors. This is discussed in more details in <xref target="control_plane"/>.
+            </t>
+            <t>
+              Management settings, such as maximum rate of ILA redirect messages, and associated security attributes (e.g. the key pair used for message signing).
+            </t>
+            <t>
+              A configuration flag that instructs the router whether the ILA redirect messages needs to be sent out. The ILA router does not receive ILA redirect messages, since it does not host any identifiers.
+            </t>
+          </list>
+        </t>
+      </section>
+      <section title="ILA router operation">
+        <t>
+          Upon booting, the ILA router is first required to join the control plane mesh and learn of the mappings that exist in the ILA domain. It is also aware of the SIR prefix that is used within its domain. After the router has learned of the mappings, it may inject the anycast SIR prefix in the data-center network and join the operational group of ILA routers.
+        </t>
+        <t>
+          When ILA router receives a packet with the upper 64-bits of the destination IPv6 address matching its configured SIR prefix, it performs the following:  
+          <list style="symbols">
+            <t>
+             Checks if the source IPv6 address matches the local SIR prefix. If it does, the packet is coming from the ILA hosts in this router's ILA domain, and the ILA router should check if the source identifier has a matching locator, discarding the packet if there is none found.
+            </t>
+            <t>
+              Attempts to find the locator matching for the destination identifier found in the bottom 64-bits of the destination IPv6 address. If the mapping for destination identifier is not found, the original packet is dropped, and an ICMPv6 "Destination Unreachable" message, type "3" is sent back to the message originator. Otherwise, the router does the following:
+              <list style="symbols">
+                <t>
+                  Rewrites the SIR prefix in the destination IPv6 address with the new locator and forwards the packet back to the data-center network. 
+                </t>
+                <t>
+                  If sending of ILA messages is permitted, the router sends the ILA redirect message back to the originator of the packet, by looking up the source identifier and finding the corresponding locator. The redirect informs the source of the actual destination locator. The redirect messages will be rate-limited to avoid sending ILA redirect for every incoming IPv6 packet.
+                </t>
+              </list>
+            </t>
+          </list>
+          For transit packets who's destination does not match the SIR prefix, the ILA router should discard the packets, as those are not supposed to be received by the ILA router.
+        </t>
+        <t>
+          If the source IPv6 address check reveals that the packet is not coming from the ILA domain the router belongs to (i.e. it does not match the local SIR prefix), the ILA router does not need to send back the ILA redirection message, but instead simply continue to forward the packet as if the locator for the destination identifier could be found. The ILA router will still send the ICMPv6 "Destinationa Unreachable" message for unknown mappings.
+        </t>
+      </section>
+      <section title="Scaling considerations">
+        <t>
+          Due to high load and reliability concerns, the ILA domain needs multiple ILA routers. The simplest way to provide redundancy is by letting the ILA routers inject the /64 SIR IPv6 prefix into the data-center network in anycast fashion (<xref target="RFC4786"/>). This will allow to naturally use the data-center network's Equal-Cost Multipath (ECMP) capabilities to distribute traffic among the ILA routers.
+        </t>
+        <t>
+          For redundancy purposes, the ILA routers would need to be spread across multiple racks in the data-center. More ILA routers could be added incrementally to reduce the load and scale capacity horizontally, and join the operational ILA group in non-disruptive fashion, after they have learned the full mapping table for the ILA domain. 
+        </t>
+        <t>
+          Use of anycast method does have some routing implications. For example, using the network described in <xref target="dc_topology"/> will result in ILA hosts preferring to use the ILA routers in the same cluster, since those are closer based on the routing metric. Thus, the network will not evenly spread their packets across all ILA routers in the data-center. It is therefore possible that some ILA routers will receive more traffic than the others.
+        </t>
+      </section>      
+    </section>
+    <section title="Deploying ILA hosts">
+      <t>
+        This section reviews the deployment considerations for the ILA hosts.
+      </t>
+      <section title="Configuration parameters">
+        <t>
+          The ILA hosts need to be configured with the following:
+          <list>
+            <t>SIR prefix of the ILA domain.</t> 
+            <t>IPv6 addresses of the BGP route reflectors.</t>
+            <t>The routable /64 locator assigned to the host.</t>
+            <t>ILA cache expiration time, to time out unused entries.</t> 
+            <t>Whether ILA redirection messages sending / receiving is enabled.</t>
+          </list>
+        </t>
+        <t>
+          By disabling both the ILA cache expiration time and sending of ILA redirect messages the host is configured for the "push" ILA mapping distribution distribution mode (see <xref target="push_vs_pull"/>). In this mode, the BGP (control plane) is assumed to populate all of the ILA cache entries in response to the identifier move events.
+        </t>
+      </section>         
+      <section title="Providing task isolation">
+        <t>
+          In simplest case, the host only needs to implement the ILA address rewrite function and inform the tasks starting on the host of the ILA addresses they can use. However, it might be desirable to provide the tasks with strong networking isolation guarantees, i.e. making sure tasks are only allowed to use the IPv6 ILA address the have been allocated. For instance, with Linux operating system, this is possible by using the <xref target="LINUX-NAMESPACES"/> and <xref target="IPVLAN"/> techniques together.
+        </t>
+        <t>
+          Each task running on the host will be contained to its own networking namespace, and has the allocated ILA address bound to an interface that belongs to this namespace. The task would then only be able to bind to the single IPv6 ILA addresses delegated to the namespace.
+        </t>
+        <t>
+          With "ipvlan" technique, the packets arriving on physical host's NIC need to have their locator field adjusted before delivering to the task (the locator field is set to the /64 prefix assigned to the host). No additional routing lookups need to be performed on the physical host. On the egress path, all IPv6 lookups and rewrites happen in the default namespace, in Linux terminology. The figure below demonstrates a host with two tasks running, each in its own networking namespace. The namespace names are "ns0" and "ns1", and the corresponding task ILA identifiers are ID0 and ID1.
+        </t>
+        <figure title="Tasks running in Linux namespaces with ipvlan">
+          <artwork>
+  +=============================================================+
+  |  Host: host1                                                |
+  |                                                             |
+  |   +----------------------+      +----------------------+    |
+  |   |   NS:ns0, ID0        |      |  NS:ns1, ID1         |    |
+  |   |                      |      |                      |    |
+  |   |                      |      |                      |    |
+  |   |        ipvl0         |      |         ipvl1        |    |
+  |   +----------#-----------+      +-----------#----------+    |
+  |              #                              #               |
+  |              ################################               |
+  |                              # eth0                         |
+  +==============================#==============================+            
+          </artwork>
+        </figure>
+        <t>
+          The use of "ipvlan"-like techniques is not strictly necessary. An alternative would be use the ILA host as a proper IPv6 router and treating the attached namespaces as hosts. This, however, has much higher performance overhead, due to multiple forwarding lookups that need to be done in the kernel.
+        </t>
+      </section>   
+      <section title="ILA host operation">
+        <t>
+          When ILA host boots up, it joins the control-plane mesh by peering with the BGP route-reflectors. It may learn the active ILA mappings from the BGP route reflectors, or may initially keep the ILA mapping cache empty, depending whether "push" or "pull" distribution model has been selected.
+        </t>
+        <t>
+          When a tasks starts it will have an ILA identifier allocated, and the corresponding IPv6 address (built out of SIR prefix + the allocated identifier) bound to an interface within the networking namespace created for the task. The mapping is then propagated over BGP peering sessions to all ILA routers.
+        </t>
+        <t>
+          For outgoing packets, the ILA host performs the following:
+          <list>
+            <t>Matches the destination IPv6 address against the SIR prefix.</t>
+            <t>If prefix matches, attempts to look-up the identifier portion of the address in the local ILA mapping table.</t>
+            <t>If a match is found in ILA table, rewrite the destination address and replace the SIR prefix with the actual locator.</t>
+          </list>
+        </t>
+        <t>
+          For packets who's destinations IPv6 address does not match the SIR prefix, the usual forwarding rules apply. If no match is found for the destination, the packet is sent as is, and is expected to be delivered to the ILA routers, since those advertise the SIR prefix into the routing domain (without the locator portion rewritten, the packet has the SIR prefix for the locator).
+        </t>
+        <t>
+          For incoming packets, the ILA host performs the following: 
+          <list>
+            <t>
+              Matches their destination IPv6 addresses against the locator prefix (64 bits) of the host.
+            </t> 
+            <t>
+              If the destination address matches, delivers the packet to the corresponding namespace, based on the identifier portion.
+            </t>
+            <t>
+              If the destination identifier in the incoming packet does not match any of the ILA mappings, and sending of ILA redirect message is enabled, the host sends an ILA redirect message back to the originator of the packet. The message will have an empty new locator value, and informs the sender that the mapping it has for the identifier is no longer valid, erasing the corresponding entry in the sender's ILA cache. 
+            </t>
+          </list>
+        </t>
+        <t>
+          Sending an ILA redirect message by the ILA host requires the host to translate the source identifier of the original message. Assuming that flow was likely bi-directional, the entry should be readily available in the local ILA cache. If not, the ILA redirect message will be routed toward the originator via the ILA routers, i.e. sent back with locator equal to the SIR prefix. It is possible that both source and destination identifiers of the flow have moved, resulting in mutual sending of ILA redirect messages.
+        </t>
+        <t>
+          If the ILA cache entry expiration time is set to non-zero, the unused ILA mapping entries will eventually be deleted. The cache expiration needs to be disabled if the mappings are learned in event-driven fashion via the BGP mesh ("push" distribution mode).
+        </t>
+      </section>
+    </section>
+    <section title="Using BGP as the ILA control plane" toc="default" anchor="control_plane">
+      <t>
+        This section discusses the use of BGP for ILA mapping information dissemination. The choice of BGP is made to allow for easier integration of hardware appliance, e.g. network switches with extended functionality, where BGP is commonly used as the control plane. Furthermore, BGP itself offers a simple way of disseminating data and converging on a key-value mapping across multiple nodes in eventually consistent fashion, and has proven track record of use in the industry. Furthermore, use of BGP allows for leveraging the monitoring extensions developed for the protocol. For example, <xref target="I-D.ietf-grow-bmp"/> could be used to observe ILA mapping changes in the network using existing tooling.
+      </t>
+      <section title="BGP topology" toc="default">
+        <t>
+          Per the common practice, a group of BGP route-reflectors (see <xref target="RFC4456"/>) should be deployed and peered over IBGP with all hosts and routers in the ILA domain. The reflectors themselves would also be peered in "full-mesh" fashion to provide backup paths for mapping information distribution, e.g. in case if one of reflectors loses a session to a host. Those reflectors do not need to be in the data-path, but merely serve for the purpose of information distribution. The number of route-reflectors should be at least two, to allow for some redundancy.
+        </t>
+        <t>
+          It is possible to co-locate the BGP route-reflectors with the ILA routers. This saves on having additional nodes for the purpose of just BGP route-reflection, but puts extra memory and CPU stress on the ILA routers, and therefore is less desirable. Furthermore, it makes capacity-planning more difficult, and therefore is not recommended.
+        </t>
+        <t>
+          The route-reflectors are required to peer with potentially a very large number of ILA hosts, which may put scaling limits on the size of the ILA domain due to the overhead of maintaining large amount of BGP peering sessions. To alleviate this problem, the pool of ILA hosts may be split into "shards" and each shard would peer with different groups of route-reflectors. For example, the ILA domain may have four groups of route reflectors, each with four route-reflectors inside in turns. The sixteen route-reflectors may then peer in a full-mesh fashion, to exchange the mappings they have received from the corresponding "shard" of the ILA domain. This method avoid the issues related to maintaining large amount of TCP sessions, but every BGP route-reflector is still required to maintain the full ILA mapping table.
+        </t>
+        <t>
+          In addition to ILA AFI/SAFI's, other AFI/SAFIs could be configured and enabled on the route-reflectors, e.g. using <xref target="I-D.lapukhov-bgp-opaque-signaling"/> for opaque information dissemination in the ILA domain.
+        </t>
+      </section>
+      <section title="Any-to-any mapping distribution" toc="default">
+        <t>
+          The ILA routers could act as IBGP route-reflectors <xref target="RFC4456"/> for all of the IBGP sessions they have, and relay the mapping information among the ILA hosts. This would allow the hosts to avoid initially sending packets to the ILA routers, at the expense of maintaining the ILA mapping table. Additionally, this allows for completely disabling the ILA redirect messages and using only the mapping information propagated by BGP.
+        </t>
+      </section>      
+      <section title="Hub-and-spoke mapping distribution" toc="default">
+        <t>
+           Alternatively, BGP could be used to deliver the mappings from ILA hosts to ILA routers only. The hosts and the routers would establish IBGP peering sessions with the route-reflectors in hub-and-spoke fashion, with BGP reflectors being the hubs. The ILA router sessions will be configured as the "route-reflector clients" on the route-reflectors, while the ILA hosts sessions will be left as ordinary IBGP sessions. This will propagate all needed mappings to the ILA routers and allow them to properly redirect the hosts. The ILA hosts are responsible for withdrawing and announcing the mappings as they change. 
+        </t>
+      </section>
+    </section>
+    <section title="Push vs pull mapping distribution modes" anchor="push_vs_pull">
+      <t>
+        The default mode of operations in ILA is "pull" mode, where mappings are learned by the ILA hosts via ILA redirect messages. Effectively, the ILA cache filling is reactive and driven by data-plane events. In some case, e.g. upon identifier move, this may result in short periods of packet loss, while the sender receives the ILA redirect message and switches back to forwarding via the ILA routers. Furthermore, the use of ILA redirect messages requires security configuration to avoid message spoofing and cache poisoning attacks. 
+      </t>
+      <t>
+        An alternative to "pull" mapping distribution on the hosts, is "push" mode, where all ILA hosts receive exactly the same mapping information as the ILA routers. In this case, the ILA message sending could be disabled in the ILA domain altogether. The "push" mode allows for proactive filling of the ILA caches, and avoiding the packet loss, provided that the new mapping reaches the sending host before the destination identifier has moved. The trade-off being the overhead of maintaining full mapping set on all ILA hosts.
+      </t>
+      <t>
+        For simplicity, this document recommends that all ILA hosts in the domain operate either in "push" or "pull" modes. In "push" mode the ILA cache entry expiration needs to be turned off, along with sending of ILA messages. If an ILA host receives a packet for the ILA address it cannot map to locally, it is expected to send an ILA redirect message. If sending the ILA messages is disabled, the host must at least send an ICMPv6 "Destination Unreachable" message with code "3" - "Address Unreachable" to aid in debugging of missing mapping message. Notice that the ILA routers always operate in "push" mode, i.e. they only learn of mappings via the control plane exchange.
+      </t>
+    </section>    
+    <section title="ILA address management" anchor="addr_management">
+      <t>
+        The ILA control plane and redirect messages perform mapping information dissemination, but the identifier allocation needs to be done separately. The address management process also depends on whether there is some hierarchy desired in the ILA namespace, e.g. if allocating a prefix per-tenant is needed.
+      </t>
+      <section title="Decentralized address management">
+        <t>
+          In simplest case, each ILA host may independently allocate unique identifier per task when it first starts, and the task will retain it for the duration of its lifetime (see Appendix A of <xref target="I-D.herbert-nvo3-ila"/>). The chances of collision are very low given the 60-bit unstructured value embedded in the identifier. The scheduler is responsible for starting and moving the task in the ILA domain. The tasks belonging to the same tenant may discover each other's addresses by some out-of-band signaling mechanism, e.g. a key-value store such as (<xref target="MEMCACHED"/>) or <xref target="ETCD"/> or re-use BGP for the same purpose as described in <xref target="I-D.lapukhov-bgp-opaque-signaling"/>. For instance, the task may publish its own identifier, consisting of the tenant name and task name, mapped to the SIR address of the task. 
+        </t>
+        <t>
+          Decentralized allocation is still possible even if the unit of address allocation is prefix, e.g. when multiple tenants are sharing the infrastructure, and unique VNID is needed per tenant (i.e. to build the 96-bit prefixes allocated to tenants from the /64 SIR prefix). Since the size of VNID space is rather small, generating random VNIDs becomes more prone to collision. In this case, decentralized address allocation schemes, such as one described in <xref target="RFC7695"/> could be used. These techniques require the ILA nodes to have some shared communication medium to "claim" the prefixes and avoid collisions. Once again, various distributed key-value stores could be used to accomplish this.
+        </t>
+      </section>
+      <section title="Centralized address management">
+        <t>
+          In more complex case, where high level of control is needed to allocate the addresses, e.g. per-tenant prefixes, centralized address management schemes could be used in the ILA domain. This could use either proprietary address allocation system, or rely on protocol such as DHCPv6.
+         </t>
+      </section>
+      <section title="Role of Task scheduler" anchor="task_scheduler">
+      <t>
+        The ILA domain needs a tasks scheduler responsible for resource allocation and starting of tenant's tasks on the ILA nodes. Defining such scheduler is outside of scope of this document. At the very minimum, the scheduler would need agents running on every ILA host, participating in ILA address allocation, and communicating with the ILA control plane to publish and remove the mappings. Since it's the scheduler that is responsible for task movements, it makes sense for it to update the mappings in the domain. Its up to the implementation 
+      </t>
+      </section>      
+    </section>    
+    <section title="ILA domain federation" anchor="domain_federation">
+      <t>
+        In default operation mode, the ILA domains treat each other as if the other domain is unaware of mappings that exist in another. It is possible to let the two domains exchange the mapping information and honor the ILA redirect messages from another domain by "merging" full or partial mapping tables of the two domains. For example, one can imagine multiple compute clusters, each being its own ILA domain. In standard ILA model, those clusters would need to communicate via the ILA routers only, increasing stress on the data-plane. To allow traffic flowing directly between the hosts in each cluster and bypassing the ILA routers, the ILA domains may exchange the mapping information, and program the ILA caches in ILA hosts to facilitate direct paths.
+      </t>
+      <t>
+        Since each domain may re-use the 64-bit identifier space on its own, the use of SIR prefix is requires to make the identifiers globally unique. This requirement is easily fulfilled since the SIR prefix is required to be globally routable in the Internet. 
+      </t>
+      <t>
+        To enable ILA domain federation, the BGP route-reflectors in each domain need need to be full meshed and configured to use the "VPN-ILA" SAFI with "ILA AFI" (see <xref target="I-D.lapukhov-bgp-ila-afi"/>). This will propagate the mappings known to each route-reflector with the SIR prefix of the local domain to scope their resolution. If multiple domains are federated in this way, intermediate route-reflectors could be used, and filtering techniques such as described in <xref target="RFC5291"/> and <xref target="RFC4684"/> could be employed. The filtering may be further used to allow leaking of only select mappings, e.g. for the identifiers that carry lots of traffic.
+      </t>     
+      <t>
+        If "push" distribution model is chosen with ILA domain federation, the ILA hosts will need to be configured to use "VPN-ILA" SAFI on their peering sessions with the BGP route reflectors. The ILA cache lookups then need to be keyed both on the SIR prefix and the identifier to be resolved.
+      </t>
+    </section>
+    <section title="Operational Considerations">
+      <t>
+        ILA introduces additional step in packet routing and thus adds more complexity to network troubleshooting process. At the same time, relative to the virtualization techniques that employ encapsulation and tunneling, ILA makes the underlying physical network fully visible to the tasks, and thus make tenant-driven troubleshooting simpler. This section discusses some operational procedures specific to ILA and the additional fault models that are possible in presence of ILA.
+      </t>
+      <section title="Operational procedures for ILA routers">
+        <t>
+          ILA routers may be added/removed from the network at any time. Adding a router is commonly needed to scale the capacity of the ILA router group when peak loads increases. Adding an ILA router is non-disruptive procedure. It starts by configuring the ILA router to peer with the BGP mesh to learn of all mappings in the domain. The use of BGP graceful restart (see <xref target="RFC4724"/>) would allow the new router to learn when all mappings have been advertised. At this time, the router may inject the SIR prefix, joining the operational group of ILA routers and start forwarding ILA traffic.
+        </t>
+        <t>
+          To gracefully take the ILA router out of service, it may be instructed to stop announcing the SIR prefix, or, in case of BGP, announce it with less preferable path attributes. This will allow the router to still accept and forward all in-flight packets, but will redirect the remaining packets toward the remaining ILA routers.
+        </t>
+      </section>
+      <section title="ILA cache complications">
+        <t>
+          Every packet egressing from an ILA host and matching the SIR prefix is subject to lookup and translation in the ILA cache. If entry is not found, the packet is forwarded to the ILA routers by the virtue of SIR prefix injected in the data-center network. If the ILA router does not have the mapping, the ICMPv6 "Destination Unreachable" message will be sent back. There are few observations to make here:
+            <list style="symbols">
+              <t>
+                Packets egressing the ILA host and not matching the SIR prefix are routed as usual.
+              </t>
+              <t>
+                ILA destinations that are not yet present in the ILA cache will be initially routed toward the ILA routers (e.g. the ILA routers will show up in the initial "traceroute" command output).
+              </t>
+              <t>
+                In case of missing identifier mapping, it's the ILA router that informs the sender of this event via an ICMPv6 "Destination Unreachable" message.
+              </t>
+            </list>
+          Thus, the case of missing mapping is easily debuggable, though the "transition period" when the mapping is not yet in the ILA cache might confuse the operator using the "traceroute" command. 
+        </t>
+        <t>
+          Worst kind of ILA cache malfunction would be presence of incorrect mapping in the ILA cache, e.g mappings pointing to a non-existent or incorrect locator. 
+          <list style="symbols">
+            <t>
+              Non-existent locator. This will lead the packet through the network, and eventually result either in packet getting discarded due to missing route or IPv6 NDP entry, or packet dropped due to routing loop and hop-limit expiration. In either case, the original sender may detect this condition either via reception of ICMPv6 "Destination Unreachable" messages, or by observing the output of the "traceroute" command. The ILA host may also be configured to make sure the identifiers fall within the known prefix range.
+            </t>
+            <t>
+              Incorrect locator. In this case, the packet will be delivered to the wrong ILA host, that does not have the mapping for the identifier. Depending on whether the sending of ILA redirect messages is enabled on the host, two scenarios are possible:
+              <list style="symbols">
+                <t>
+                  The destination ILA host sends back an ILA redirect message with empty locator, informing the sender that mapping is invalid. The sender will invalidate the cache entry and switch over to routing via the ILA routers. The latter will either inform if of the new mapping, or send an ICMPv6 "Destination Unreachable" message back.
+                </t>
+                <t>
+                  The destination ILA host is not configured to send the ILA redirect messages back. In this case, it simply responds with the ICMPv6 "Destination Unreachable" messages for the duration of time the sender keeps sending the packets using the incorrect mapping. The mapping needs to be flushed our updated by some external mean.
+                </t>
+              </list>
+            </t>
+          </list>
+        </t>
+        <t>
+          Next possible failure is dropped ILA redirect messages. However, given that the ILA redirect message sending process has no memory, the recipient will eventually receive one of them, or at least finish the communication via an ILA router.
+        </t>
+      </section>
+      <section title="ILA routers complications">
+        <t>
+          The ILA routers serve as proxies for traffic entering the ILA domain, as well as temporary transit hops for traffic between the ILA hosts when they don't have matching mappings, in case if "pull" distribution model is utilized. The following operational observations apply:
+          <list style="symbols">
+            <t>
+              Traffic between the ILA domain and external world will necessarily flow asymmetrically. The packets toward the ILA hosts sent from the outside will always cross the ILA routers (see <xref target="domain_federation"/> for exceptions from this case) and traffic returning from the ILA hosts to the external world will flow directly bypassing the ILA routers. This will show up in the outputs of the "traceroute" command running from sender and destination and being asymmetric. This being said, asymmetric traffic flows are very common in modern networks, and thus it should be a problem on its own. 
+            </t>
+            <t>
+              A failure of ILA router should be handled by re-balancing the load automatically by means of ECMP re-hashing in the network, and therefore should be mostly transparent to the ILA hosts, unless the load increases significantly after the failure. It is possible to have cascading failure and lose all ILA routers, or have them over-utilized. This event should be detected by external monitoring system, and be acted upon by adding more ILA routers to the domain - either automatically or manually. From troubleshooting perspective, the event will manifest itself via massive packet loss toward all hosts in the ILA domain. 
+            </t>
+            <t>
+              A malfunction of single ILA router (e.g. network interface card issue) would manifest itself in somewhat increased packet drop ratios for flows crossing the ILA routers, mostly traffic from external nodes. The more ILA routers the domain has, the harder to notice this ratio would be, since ECMP mostly spreads traffic evenly over all the ILA routers.
+            </t>
+          </list>
+        </t> 
+        <t>
+          To sum the above up - the health of ILA router is critical to the ILA domain functions, even if "push" model is employed and the ILA routers are used mostly for external communications. The ILA routers should be monitored closely for vital parameters, such as CPU and memory utilization, traffic rates on their network interfaces, and packet loss toward the routers themselves. 
+        </t>
+      </section>
+    </section>
+    <section title="Deployment Scenario Primer">
+      <t>
+        Building upon the above, this section provides a simplest possible ILA deployment scenario.
+        <list style="symbols">
+          <t>
+            For locator addressing, unique-local addresses should be allocated, with 16-bit available for sub-allocation. This allows setting 1024 (2^10) Tier-3 switches with 64 (2^4) servers under each Tier-3 switch. Using the Clos topology from section <xref target="dc_topology"/> one can build 32 clusters with 32 Tier-3 switches each.
+          </t>
+          <t>
+            The hosts in the network could use BGP to peer with Tier-3 switches and inject their locator prefixes. It's desirable, but not necessary to configure the route summarization on the network switches, depending on the size of the deployment.
+          </t>
+          <t>
+            Given the moderate scale of thousands of hosts, four IBGP route-reflectors could be deployed in the ILA domain, without the need for extra level of aggregation hierarchy. Each route-reflector will need to be configured to accept the BGP sessions from all of ILA hosts and maintain thousands of peering sessions.
+          </t>
+          <t>
+            The ILA hosts and routers should be configured with a single SIR prefix, and set up for "push" mapping distribution model, by completely disabling the ILA redirection messages. This will result in all ILA mappings propagated to all hosts and ILA routers via BGP. Each ILA host and router will need to be running a BGP process and peer with all four route-reflectors.
+          </t>
+          <t>
+            The ILA routers will inject the SIR prefix using BGP into the data-center network.
+          </t>
+          <t>
+            For tasks running on ILA hosts, the globally unique 60-bit ILA identifiers should be allocated independently in pseudo-random fashion by the host that first starts the task.            
+          </t>
+          <t>
+            As task is moved, the task scheduler will update the mapping and publish it via BGP, forcing the ILA routers and ILA hosts all update their ILA mapping tables.
+          </t>
+          <t>
+            ILA domain federation is not used, making every ILA domain communicate to each other via the ILA routers only.
+          </t>
+        </list>
+      </t>
+    </section>
+    <section title="IANA Considerations" toc="default">
+      <t>
+        None
+      </t>
+    </section>
+    <section title="Manageability Considerations" toc="default">
+      <t>
+        TBD
+      </t>
+    </section>
+    <section title="Security Considerations" toc="default">
+      <t>
+        The ILA introduces new security considerations described below.
+      </t>
+      <section title="ILA host security" toc="default">
+        <t>
+          If unsecured ILA redirect messages are used, the ILA hosts could be exposed to cache poisoning attacks. This calls for ILA redirect message authentication, e.g. by use of digital signatures, such as <xref target="ED25519"/>. This will also require to use some mechanism for propagation of public keys associated with the SIR prefix (the ILA routers) and every locator in the domain, since the ILA redirect message could be sent by either. 
+        </t>
+        <t>
+          To prevent tasks from every being able to sent packets directly bypassing the mapping layer, the ILA hosts should prohibit the task from sending packets toward the address space associated with the locators. Given that all locators will likely to belong to one large prefix, this could be accomplished by installing a single filtering rule on the ILA host.
+        </t>
+      </section>
+      <section title="ILA router security" toc="default">
+        <t>
+          TBD
+        </t>
+      </section>
+      <section title="Tenant security" toc="default">
+        <t>
+          ILA does not natively isolate the tenant traffic from each other, nor from the underlying physical infrastructure. In fact, this is seen as one benefit that makes many troubleshooting processes easier. The access control then become responsibility of the tenant itself, by employing traffic filtering rules. To this point, implementing filtering rules gets simpler if the tenant is allocated single prefix, as opposed to each task getting an unique identifier.
+        </t>
+      </section>
+    </section>
+    <section title="Acknowledgements" toc="default">
+      <t>
+      TBD
+      </t>
+    </section>
+  </middle>
+  <back>
+    <references title="Informative References">
+      <?rfc include="reference.RFC.4271.xml"?>
+      <?rfc include="reference.RFC.4456.xml"?>
+      <?rfc include="reference.RFC.4684.xml"?>
+      <?rfc include="reference.RFC.5291.xml"?>
+      <?rfc include="reference.RFC.6740.xml"?>
+      <?rfc include="reference.RFC.2791.xml"?>            
+      <?rfc include="reference.RFC.3633.xml"?>
+      <?rfc include="reference.RFC.4724.xml"?>
+      <?rfc include="reference.RFC.4760.xml"?>
+      <?rfc include="reference.RFC.4786.xml"?>
+      <?rfc include="reference.RFC.6769.xml"?>
+      <?rfc include="reference.RFC.7695.xml"?>
+      <?rfc include="reference.I-D.herbert-nvo3-ila"?>
+      <?rfc include="reference.I-D.ietf-rtgwg-bgp-routing-large-dc"?>
+      <?rfc include="reference.I-D.lapukhov-bgp-opaque-signaling"?>
+      <?rfc include="reference.I-D.ietf-v6ops-dc-ipv6"?>
+      <?rfc include="reference.I-D.lapukhov-bgp-ila-afi"?>
+      <?rfc include="reference.I-D.ietf-grow-bmp"?>
+
+      <reference anchor="ED25519" target="https://ed25519.cr.yp.to">
+        <front>
+          <title>
+            Ed25519: high-speed high-security signatures
+          </title>
+          <author/>          
+          <date/>
+        </front>           
+      </reference>
+
+      <reference anchor="ETCD" target="https://github.com/coreos/etcd">
+        <front>
+          <title>
+            coreos/etcd
+          </title>
+          <author/>          
+          <date/>
+        </front>        
+      </reference>
+
+      <reference anchor="MEMCACHED" target="https://memcached.org/">
+        <front>
+          <title>
+            Memcached
+          </title>
+          <author/>          
+          <date/>
+        </front>
+      </reference>
+
+      <reference anchor="ROUTED-DESIGN" target="http://www.cisco.com/c/en/us/td/docs/solutions/Enterprise/Campus/routed-ex.html">
+        <front>
+          <title>
+            High Availability Campus Network Design
+          </title>
+          <author/>          
+          <date year="2008"/>
+        </front>
+      </reference>
+
+      <reference anchor="LINUX-NAMESPACES" target="https://lwn.net/Articles/531114/">
+        <front>
+          <title>
+             Namespaces in operation, part 1: namespaces overview
+          </title>
+          <author/>          
+          <date year="2013"/>
+        </front>        
+      </reference>     
+
+      <reference anchor="IPVLAN" target="https://github.com/torvalds/linux/blob/master/Documentation/networking/ipvlan.txt">
+        <front>
+          <title>
+             IPVLAN Driver HOWTO
+          </title>
+          <author/>          
+          <date year="2013"/>
+        </front>        
+      </reference>
+    </references>
+  </back>
+</rfc>
