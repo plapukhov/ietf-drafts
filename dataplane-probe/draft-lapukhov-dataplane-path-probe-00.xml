@@ -20,6 +20,19 @@
         <email>petr@fb.com</email>
       </address>
     </author>       
+    <author initials="R." surname="Chang" fullname="Remy Chang">
+      <organization>Barefoot Networks</organization>
+      <address>
+        <postal>
+          <street>2185 Park Boulevard</street>
+          <city>Palo Alto</city>
+          <region>CA</region>
+          <code>94306</code>
+          <country>US</country>
+        </postal>
+        <email>remy@barefootnetworks.com</email>
+      </address>
+    </author>       
     <date year="2015"/>
     <area>ops</area>
     <workgroup>opsawg</workgroup>
@@ -88,7 +101,7 @@
           </artwork>
         </figure>
         <t>
-          Notice that all record placeholders are equal size, as prescribed by the telemetry record template, and that space for those must be pre-allocated by the sender of the packet.  Each record corresponds to a single network element on the path from sender to receiver of the packet.
+          Notice that all record placeholders are equal size, as prescribed by the telemetry record template.  For efficient hardware implementation, new records are pushed into the stack along each hop.  This allows for telemetry data to be inserted dynamically as the records indicate.  Each record corresponds to a single network element on the path from sender to receiver of the packet.
         </t>
       </section>
       <section title="Header Format" toc="default">
@@ -104,16 +117,12 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+    
 |                         Probe Marker (2)                      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|         Version Number        |       Must Be Zero        |S|O|
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  Message Type |   Hop Limit   |          Must Be Zero         |
+|Ver Num|Msg Typ|   Hop Limit   | Record Count  | Max Rcrds |S|O|
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                        Sender's Handle                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                        Sequence Number                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                          Write Offset                         |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+            
           </artwork>
         </figure>
         <t> 
@@ -123,6 +132,10 @@
             </t>
             <t>
               "Version Number" is currently set to 1.
+            </t>
+            <t> The "Message Type" field value could be either "1" - "Probe" or "2" - "Probe Reply"</t>
+            <t>
+              "Hop Limit" is defined only for "Message Type" of "1" ("Probe"). For "Probe Reply" the "Hop Limit" field must be set to zero. This field is treated as an integer value and decremented by every network element in the path as "Probe" propagates. See the <xref target="loopback_mode"/> section on the intended use of the field.
             </t>
             <t>
               The "Global Flags" field is 8 bits, and defines the following flags:
@@ -135,15 +148,14 @@
                 </t>
               </list>
             </t>
-            <t> The "Message Type" field value could be either "1" - "Probe" or "2" - "Probe Reply"</t>
-            <t>
-              "Hop Limit" is defined only for "Message Type" of "1" ("Probe"). For "Probe Reply" the "Hop Limit" field must be set to zero. This field is treated as an integer value and decremented by every network element in the path as "Probe" propagates. See the <xref target="loopback_mode"/> section on the intended use of the field.
-            </t>
             <t>
               The "Sender's Handle" field is set by the sender to allow the receiver to identify a particular originator of probe packets. Along with "Sequence Number" it allows for tracking of packet order and loss within the network.
             </t>
             <t>
-              The "Write Offset" field specifies the offset for the next telemetry record to be written in the probe packet body. It counts from the start of the packet body and must be initially set to the first octet after the "Record Template" field. It must be incremented by every network element that adds a telemetry record, without overflowing the storage. This simplifies the work for the subsequent network element - it just needs to parse the template and then add the data at the "Write Offset".
+              The "Record Count" field specifies the number of telemetry records currently in the stack of the probe packet body. It begins with zero and must be incremented after every network element adds a telemetry record.  Combined with a push mechanism, this simplifies the work for the subsequent network element and the packet receiver.  The subsequent network element just needs to parse the template and then insert a new record immediately after the template while the probe packet receiver can look at the Record Count field to parse the Telemetry Records.
+            </t>
+            <t>
+              The "Max Records" field specifies the maximum number of telemetry records allowed in a given packet.  Given that the sender knows the minimum path MTU, the sender can pre-populate the maximum number of records allowed before exceeding the MTU.  This eases hardware implementation to be based on a comparison between "Record Count" and "Max Records" to decide whether or not an overflow has occurred.
             </t>
           </list>
         </t>
@@ -174,10 +186,10 @@
       </section>
       <section title="Telemetry Record">
         <t>
-          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record as defined in the "Record Template" to the probe packet. The new record must be inserted at the "Write Offset" position in the packet payload, with the "Write Offset" subsequenly incremented by the size of the new record. The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet. The most significant bit in the type field ("S-bit") must be set to "1" if the network element was able to understand and record the requested telemetry type. That bit must be set to zero otherwise, along with the contents of the "Value" field. The length field is the TLV field length including the "Type" and "Length" fields.
+          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record as defined in the "Record Template" to the probe packet. The new record must be inserted after the "Record Template", with the "Record Count" subsequenly incremented by one. The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet. The most significant bit in the type field ("S-bit") must be set to "1" if the network element was able to understand and record the requested telemetry type. That bit must be set to zero otherwise, along with the contents of the "Value" field. The length field is the TLV field length including the "Type" and "Length" fields.
         </t>
         <t>
-          If writing a new telemetry record to the packet body would cause it to exceed the packet size, no record is added and the overflow "O-bit" must be set to "1" in the probe header.
+          If inserting a new telemetry record would cause "Record Count" to exceed "Max Records", no record is added and the overflow "O-bit" must be set to "1" in the probe header.
         </t>
         <figure title="Telemetry Record Format" anchor="telemetry_record" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">        
@@ -240,26 +252,22 @@
       </section>
       <section title="Timestamp">
         <t>
-          This telemetry record encodes the time that the packet enters and leaves the device, in UTC. The "entering" time is recorded when the L2 header enters the processing pipeline. The "exit" time is recorded when the network elements starts serializing L2 header on egress port.
+          This telemetry record encodes the time data associated with the packet. Most existing hardware support timestamping for IEEE1588.  To simplify implementation, packet receive time is stored similarly as 48-bits of seconds, 32-bits of nanoseconds, and residence time is in 48-bits of nanoseconds.
         </t>
         <figure title="Timestamp" anchor="time_stamp" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 10 (Timestamp)     |           Length =  28        |
+|S|   Type = 10 (Timestamp)     |           Length =  20        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                       Receive Seconds                         |
+|                    Receive Seconds [47:16]                    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     Receive Microseconds                      |
+|    Receive Seconds [15:0]     |  Receive Nanoseconds [31:16]  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Receive Nanoseconds                      |
+|  Receive Nanoseconds [15:0]   |     Residence Time [47:32]    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Send Seconds                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                       Send Microseconds                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        Send Nanoseconds                       |
+|                     Residence Time [31:0]                     |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
           </artwork>
         </figure>
@@ -273,11 +281,9 @@
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|  Type = 11 (Queueing Delay) |           Length =  16        |
+|S|  Type = 11 (Queueing Delay) |           Length =  12        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                            Seconds                            |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                          Microseconds                         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                          Nanoseconds                          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
