@@ -68,7 +68,7 @@
     <keyword>Key-Value</keyword>
     <abstract>
       <t>
-        Border Gateway Protocol with multi-protocol extensions (MP-BGP) enables the use of the protocol for dissemination of virtually any information. This document proposes a new Address Family/Subsequent Address Family to be used for distribution of opaque data. This functionality is intended to be used by applications other than BGP for exchange of their own data on top of BGP mesh. The structure of such data SHOULD NOT be interpreted by the regular BGP speakers, rather the goal is to use BGP purely as a convenient and scalable  communication system.
+        Border Gateway Protocol with multi-protocol extensions (MP-BGP) enables the use of the protocol for dissemination of virtually any information. This document proposes a new Address Family/Subsequent Address Family to be used for distribution of opaque data. This functionality is intended to be used by applications other than BGP for exchange of their own data on top of BGP mesh. The structure of such data SHOULD NOT be interpreted by the regular BGP speakers, rather the goal is to use BGP purely as a convenient and scalable communication system.
       </t>
     </abstract>
     <note title="Requirements Language">
@@ -82,29 +82,20 @@
       <t>
         Implementation of <xref target="RFC4760">Multiprotocol Extensions for BGP-4</xref> gives the ability to pass arbitrary data in BGP protocol messages. This capability has been leveraged by many for dissemination of non-routing related information over BGP (e.g. <xref target="RFC5575">"Dissemination of Flow Specification Rules"</xref> as well as <xref target="I-D.ietf-idr-ls-distribution">"North-Bound Distribution of Link-State and TE Information using BGP"</xref>). However, there has been no channel defined explicitly to disseminate data with arbitrary payload. The intended use case is for applications other than BGP to leverage the protocol machinery for distribution (broadcasting) of their own state in the network domain. Publishers and consumers will use BGP UPDATE messages to submit and receive opaque data. It is up to the BGP implementation to provide a custom API for message producers or consumers if needed. 
       </t>
-      <t>
-        One application of this extension could be auto-discovery of various  services in the data-center network that uses BGP as the routing protocol  of choice (<xref target="I-D.ietf-rtgwg-bgp-routing-large-dc"/>).
-      </t>
-      <t>
-        Another application is building and testing new routing protocols or BGP extensions within existing BGP implementation. The new protocol/extension may influence routing either by directly communicating to the RIB/FIB of the router it runs on, or by overriding BGP paths via BGP route injection. An example of such BGP extension could be <xref target="WISER"/>
-      </t>
     </section>
     <section title="BGP Opaque Data AFI" toc="default">
       <t>
-        This document introduces a new AFI known as a "BGP Opaque Data AFI" with the actual value to be assigned by IANA. The purpose  of this AFI is to exchange opaque information within a BGP  network.
+        This document introduces a new AFI known as a "BGP Opaque Data AFI" with the actual value to be assigned by IANA. The purpose  of this AFI is to exchange opaque information within a BGP network. The propagation scope if to be controlled by the usual means of BGP policy, except that the policy could not match on NLRI information in any form other than an opaque string.
       </t>
     </section>
     <section title="BGP Key-Value SAFI" toc="default">
       <t>
-        This document introduces a new SAFI known as "BGP Key-Value  SAFI" with the actual value to be assigned by IANA. The purpose  of this SAFI is exchange of opaque information structured as a  Key-Value binding.
+        This document introduces a new SAFI known as "BGP Key-Value  SAFI" with the actual value to be assigned by IANA. The purpose of this SAFI is exchange of opaque information structured as Key-Value binding.
       </t>
     </section>
     <section title="BGP Key-Value VPN SAFI" toc="default">
       <t>
-        This document introduces a new SAFI known as a "BGP Key-Value VPN  SAFI" with the actual value to be assigned by IANA. The purpose of  this SAFI is exchange of opaque information structured as a Key-Value binding over service provider backbone providing Virtual Private Networks as a service.
-      </t>
-      <t>
-        <xref target="RFC4364"/> defines a method and procedures for implementing VPNs using  BGP as a control plane. All the procedures of <xref target="RFC4364"/> applies to  the BGP Key-Value VPN SAFI. To facilitate the support for VPNs, the NLRI for the opaque information has 8 bytes of Route Distinguisher at the beginning of the NLRI field.
+        This document introduces a new SAFI known as a "BGP Key-Value VPN SAFI" with the actual value to be assigned by IANA. The purpose of this SAFI is exchange of opaque information structured as a Key-Value binding over service provider backbone providing Virtual Private Networks as a service. The <xref target="RFC4364"/> defines a method and procedures for implementing VPNs using BGP as a control plane. All the procedures of <xref target="RFC4364"/> apply to the BGP Key-Value VPN SAFI. Under this SAFI, the NLRI for the opaque information have the mandatory 8 bytes of Route Distinguisher at the beginning of the NLRI field.
       </t>
     </section>    
     <section title="Capability Advertisement" toc="default">
@@ -114,22 +105,22 @@
     </section>    
     <section title="Disseminating Key-Value bindings" toc="default">
       <t>
-        This document proposes to implement a distributed, eventually consistent Key-Value store on top of existing BGP protocol mechanics. The "Key" portion is to be encoded as the NLRI part of MP_REACH_NLRI attribute and "Value" encoded using a new optional transitive attribute. 
+        This document proposes to implement a distributed, eventually consistent Key-Value store on top of existing BGP protocol transport mechanism. The "Key" and "Value" portions are to be encoded as the NLRI part of MP_REACH_NLRI attribute. 
         <list style="symbols">
           <t>
-            Publishers, acting as BGP speakers, advertise keys along with associated values into the routing domain. The BGP  network synchronizes that state by propagating the encoded  data following regular BGP protocol operations. 
+            Publishers, acting as BGP speakers, advertise keys along with associated values into the routing domain. The BGP network disseminates that state by propagating the encoded data following regular BGP protocol operations. 
           </t>
           <t>
-            Consumers, acting as BGP speakers, receive the information via BGP protocol UPDATE messages. Only publishers and  consumers of the opaque data are supposed to interpret its  contents - the rest of the BGP network acts merely as a  dissemination system. 
+            Consumers, acting as BGP speakers, receive the information via BGP protocol UPDATE messages. Only publishers and consumers of the opaque data are supposed to interpret its contents. The rest of the BGP network acts merely as a dissemination system. 
           </t>
         </list>
       </t>
       <t>
-        Multiple publishers can advertise the same key (NLRI) bound to different values. It is also possible for the advertised binding to have the same Key-Value pairs but differ in some other BGP attributes. In that case, BGP would follow the best-path selection logic to prevent duplicate information in the network. A consumer will receive the value created by the publisher "closest" in terms of BGP best-path selection logic, based on the policies that exist in the routing domain. This document does not propose any method of achieving global consensus for all published values for a given key. 
+        Multiple publishers can advertise the same key (NLRI) bound to different values. It is also possible for the advertised binding to have the same Key-Value pairs but differ in some other BGP attributes. In that case, the BGP implementation would follow the normal best-path selection logic to prevent duplicate information in the network. A consumer will receive the value created by the publisher "closest" in terms of BGP best-path selection logic, based on the policies that exist in the routing domain. This document does not propose methods to achieve global consensus for all published values of a given key. 
       </t>  
       <section title="Publishing a Key-Value binding" toc="default">
         <t>
-          The encoding scheme proposed below follows the semantics of a Key-Value bindings. The "Key" is stored in the NLRI section of the MP_REACH_NLRI attribute, as shown on <xref target="mp_reach_nlri"/>. 
+          The encoding scheme proposed below follows the semantics of a Key-Value bindings. The "Key" and "Value" are stored in the NLRI section of the MP_REACH_NLRI attribute, as shown on <xref target="mp_reach_nlri"/>. 
         </t>
         <figure title="MP_REACH_NLRI Layout" anchor="mp_reach_nlri" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
@@ -146,6 +137,8 @@
     +---------------------------------------------------------+
     | Opaque Key Data (variable)                              |
     +---------------------------------------------------------+
+    | Opaque Value Data (variable)                            |
+    +---------------------------------------------------------+
           </artwork>
         </figure>
         <t>
@@ -154,76 +147,21 @@
               The AFI/SAFI values are to be allocated by IANA.
             </t>
             <t>
-              Length of Next Hop Address: must be zero.
+              Length of Next Hop Address: must be zero, indicating empty next-hop.
             </t>
             <t>
-              Opaque Key Length: identifies the size of the Key field in octets. If field is set to zero, the implementation MUST ignore the advertisement. The Key length of 2 octets allows BGP Opaque SAFI to carry NLRI longer than 255 octets. This document defines a maximum Key Length of 4000 bytes. Message where the Key value length exceeds 4000 MUST be ignored, and this event MAY be logged.
+              Opaque Key Length: identifies the size of the Key field in octets, and unsigned integer value. The field MUST have a value of at least one octet under Key-Value SAFI and at least 9 octets under the VPN Key-Value SAFI. Violating this requirement MUST cause the receiver to ignore the advertised Key-Value binding in the particular MP_UNREACH_NLRI.
             </t>
             <t>
-              Opaque Key Data: the byte string representing the opaque key contents. For Key-Value VPN SAFI, the key data field starts with 8 bytes of Route Distinguisher corresponding to the originator of the key value.
+              Opaque Key Data: the byte string representing the opaque key contents. For "Key-Value VPN SAFI", the key data field MUST be at least 9 bytes long, with 8 bytes of Route Distinguisher value corresponding to the originator of the message.
+            </t>
+            <t>
+              Opaque Value Data: The length of this field is determined by subtracting the length of all previous fields from the total length of MP_REACH_NLRI attribute. This field MAY be empty.
             </t>
           </list>
         </t>
         <t>
-          The "Value" portion of a published binding is to be encoded in  a new optional non-transitive attribute as shown on <xref  target="opaque_value_attribute"/>:
-        </t>
-        <figure title="OPAQUE_VALUE attribute layout" anchor="opaque_value_attribute" suppress-title="false" align="left" alt="" width="" height="">
-          <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
-    0                   1                   2                   3
-    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+     
-    | Attr Flags    | Attr Type Code|          Attr Length          |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+    
-    |                 Originator AS Number (4 Octets)               |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |                   Originator ID (16 Octets)                   |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |                       Originator ID                           |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |                       Originator ID                           |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |                       Originator ID                           |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    | Opaque Value Length           |                               |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               |
-    ~                                                               ~
-    |                   Opaque Value Data (variable)                |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+..........................
-          </artwork>
-        </figure>   
-        <t>
-          <list style="symbols">
-            <t>
-              Attr Flags reflect that the attribute is optional and non-transitive. The implementations MUST set the extended length bit to "1", thus requiring the attribute length field of two octets.
-            </t>
-            <t>
-              Attr Type Code: Identifies the new OPAQUE_VALUE attribute, with the value to be allocated by IANA.
-            </t>
-            <t>
-              Attr Length: the full length of the attribute, two octets.
-            </t>
-            <t>
-              AS Number: Four octets encoding the AS Number of an Autonomous System originating the key-value binding. If set to non-zero, the receiving BGP speaker SHOULD validate this field for correctness, e.g. making sure it does not carry reserved AS number values. In case of format violation, the receiving speaker SHOULD ignore the attribute and MAY log this event.     
-            </t>
-            <t>
-              Originator ID: 16 Octets encoding the Originator ID value. If set to non-zero, the Originator ID SHOULD be interpreted an IPv6 address of a node originating the NLRI. In case if the sending node does not have an IPv6 addresses, the IPv4-mapped IPv6 address SHOULD be used. If set to non-zero, the receiving BGP speaker SHOULD validate the field to be a syntactically valid IPv6 or IPv4 unicast address. In case of format violation, the receiving speaker SHOULD ignore the attribute value and MAY log this event.
-            </t>
-            <t>
-              Opaque Value Length: Two octets encoding the total length of the attribute in octets, including the Type and Length fields. The length is encoded as an unsigned binary  integer. The four most significant bits of this field MUST  be set to zero, due to the limit imposed by maximum BGP  message size. Note that the minimum length is "3", indicating that no Opaque Value Data field is present. Such binding, in presence of non-zero length key is still  valid, as it informs the consumers that the key "exists".
-            </t>
-            <t>
-              Opaque Value Data: A field containing zero or more octets. This portion SHOULD NOT be interpreted by BGP implementations.
-            </t>
-          </list>
-        </t>
-        <t>
-          The AS Number and the Originator ID COULD be used to ensure key uniqueness among multiple autonomous systems. If not needed, those field SHOULD be set to zero and ignored by the implementation.
-        </t>
-        <t>
-          Even when the OPAQUE_VALUE attribute is not present in BGP advertisement, the BGP implementation MUST still retain Opaque Key (NLRI) in its LocRIB and propagate it  further as usual. This case is to be interpreted as an announcement of the key existence.
-        </t>
-        <t>
-          The maximum size of the opaque Key and Value opaque strings is limited by the BGP UPDATE message size. With the default protocol implementation is may not exceed 4KB, however if <xref target="I-D.ietf-idr-bgp-extended-messages"/> is implemented it could be as large as 64KB.
+          The maximum size of the Opaque "Key" and "Value" fields together is limited by the BGP UPDATE message size. With the default BGP protocol implementation is may not exceed 4096 octets. However, if <xref target="I-D.ietf-idr-bgp-extended-messages"/> is implemented, it could be as large as 65546 octets.
         </t>
       </section>
       <section title="Removing a Key-Value binding" toc="default">
@@ -231,7 +169,7 @@
           The removal procedure follows the regular MP-BGP route withdrawal, using the MP_UNREACH_NLRI attribute. This section  defines the attribute structure for the new AFI/SAFI. 
         </t>
         <t>
-          The message shown on <xref target="mp_unreach_nlri"/> instructs the receiving BGP speaker to delete the N bindings corresponding to Key 1, Key 2 ... Key N if the keys have been  previously learned from the withdrawing speaker. If any of the  Keys is not found in the LocRIB or has not been previously  received from the withdrawing BGP peer, such key removal  request MUST be ignored.
+          The message format is shown on <xref target="mp_unreach_nlri"/>. This message instructs the receiving BGP speaker to delete the N bindings corresponding to Key 1, Key 2 ... Key N if the keys have been previously learned from the withdrawing speaker. If any of the keys is not found in the LocRIB or has not been previously received from the withdrawing BGP peer, such key removal request MUST be ignored. For the Key-Value SAFI, each key length field must have the value of at least "1". For the VPN Key-Value SAFI, each key length must be at least 9 octets long. Violation of of these constraints MUST cause the receiver of the UPDATE message to ignore the corresponding key withdrawal.
         </t>
         <figure title="MP_UNREACH_NLRI attribute layout" anchor="mp_unreach_nlri" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
@@ -252,19 +190,19 @@
           </artwork>
         </figure>  
       </section>
+    </section>
+    <section title="Manageability Considerations" anchor="op_considerations" toc="default">
       <section title="Propagating multiple values for the same key" anchor="add_path" toc="default">
         <t>
-           It is possible to propagate multiple values associated with  the same key using the Add-Path extension defined in <xref target="I-D.ietf-idr-add-paths" />. However, this  document  that instead unique key values SHOULD be used for this purpose. It is up to the consumers and publishers of the opaque data to settle on single unique value using some kind of consensus protocol.
+           It is possible to propagate multiple values associated with the same key using the Add-Path extension defined in <xref target="I-D.ietf-idr-add-paths" />. However, this  document recommends that instead unique key values SHOULD be used for this purpose. It is up to the consumers and publishers of the opaque data to settle on single unique value using some kind of consensus protocol.
+        </t>
+        <t>
+          As a recommendation, the orignators of key-value pairs may use the origin ASN and an IPv4 or IPv6 address assigned to the originating device to create a unique key prefix. Alternatively, UUIDs could be used to generate the unique key names, see <xref target="RFC4122"/>
         </t>
       </section>
-    </section>
-    <section title="Message filtering" toc="default">
-      <t>
-        Limiting the scope of opaque information flooding is an important operational concern. BGP already has the mechanisms  needed to control this process, and these mechanisms are briefly  reviewed below. 
-      </t>
       <section title="Automated filtering">
         <t>
-          One can leverage mechanics presented in <xref target="RFC4684"/> and use the route-target extended  community attribute to identify "channels" where key-value  bindings are published. The consumers would signal their  interest in particular "channel" by advertising the  corresponding router-target membership. The publications then  need to contain the router-target extended community attribute  to constrain information propagation.
+          One can leverage mechanics presented in <xref target="RFC4684"/> and use the route-target extended community attribute to identify "channels" where key-value  bindings are published. The consumers would signal their  interest in particular "channel" by advertising the  corresponding router-target membership. The publications then  need to contain the router-target extended community attribute  to constrain information propagation.
         </t>
       </section>
       <section title="Filtering via policy">
@@ -275,22 +213,17 @@
     </section>
     <section title="IANA Considerations" toc="default">
       <t>
-        For the purpose of this work, IANA would be asked to allocate values for the new AFI and SAFI, as well as a value for the new  optional transitive attribute.
-      </t>
-    </section>
-    <section title="Manageability Considerations" toc="default">
-      <t>
-        TBD
+        For the purpose of this work, IANA would be asked to allocate values for the new AFI and SAFIs.
       </t>
     </section>
     <section title="Security Considerations" toc="default">
       <t>
-        This document does not introduce any changes in terms of BGP  security.
+        This document does not introduce any changes in terms of BGP security. The usual set of issues that arise from running multiple AFI/SAFI's over single BGP session would apply in this case.
       </t>
     </section>
     <section title="Acknowledgements" toc="default">
       <t>
-        The authors would like to acknowledge the contributions from Keyur Patel regarding the implementation of unique key semantic and proposal to support for Opaque Key-Value VPN SAFI.
+        The authors would like to acknowledge the contributions from Keyur Patel regarding the suggestion of unique key semantic and proposal to support for Opaque Key-Value VPN SAFI.
       </t>
     </section>
   </middle>
@@ -300,6 +233,7 @@
       <?rfc include="reference.RFC.4271.xml"?>
     </references>
     <references title="Informative References">
+      <?rfc include="reference.RFC.4122.xml"?>
       <?rfc include="reference.RFC.4360.xml"?>
       <?rfc include="reference.RFC.4364.xml"?>
       <?rfc include="reference.RFC.4684.xml"?>
@@ -308,19 +242,7 @@
       <?rfc include="reference.RFC.5575.xml"?>
       <?rfc include="reference.I-D.ietf-idr-add-paths"?>
       <?rfc include="reference.I-D.ietf-idr-ls-distribution"?>
-      <?rfc include="reference.I-D.ietf-rtgwg-bgp-routing-large-dc"?>
       <?rfc include="reference.I-D.ietf-idr-bgp-extended-messages"?>
-      <reference anchor="WISER" target="http://research.microsoft.com/en-us/um/people/ratul/papers/nsdi2007-wiser.pdf">
-        <front>
-          <title>
-            Mutually Controlled Routing with Independent ISPs
-          </title>
-          <author initials="R" surname="Mahajan" fullname="Ratul Mahajan"/>
-          <author initials="D" surname="Wetherall" fullname="David Wetherall"/>
-          <author initials="T" surname="Anderson" fullname="Thomas Anderson"/>
-          <date year="2007"/>
-        </front>
-      </reference>
     </references>
   </back>
 </rfc>
