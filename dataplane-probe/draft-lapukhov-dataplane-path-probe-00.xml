@@ -79,29 +79,29 @@
       </section>    
       <section title="Probe structure" toc="default">
         <t>
-          The sender is responsible for constructing a packet large enough to hold all records to be added by the network elements.  Concurrently, the probes must not exceed the minimum MTU allowed along the path, so it is assumed that the sender either knows the needed MTU or relies on well-known mechanisms for path MTU discovery. After adding the mandatory protocol (IP, UDP, etc.) headers, the packet payload is built according to the following layout:
-        </t>
+          The sender is responsible for constructing a packet with the header and desired record template in place.  The packet will initially hold no records.  Each network element capable of reporting records is expected to push additional record(s) after the telemetry template.  After adding the mandatory protocol (IP, UDP, etc.) headers, the packet created by the sender will include the Header and Telemetry Record Template in the figure below.  After network elements have added telemetry records, the packet will take on the following layout:
+       </t>
         <figure title="Probe layout" anchor="probe_layout" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
 +---------------------------------------------------------+
 | Header                                                  |
 +---------------------------------------------------------+
-| Telemetry Record template                               |
+| Telemetry Record Template                               |
 +---------------------------------------------------------+
-| Placeholder for telemetry record 1                      |
+|                 Telemetry record N                      |
 +---------------------------------------------------------+
-| Placeholder for telemetry record 2                      |
+|                 Telemetry record N-1                    |
 +---------------------------------------------------------+
 .                                                         .
 .                                                         .
 .                                                         .
 +---------------------------------------------------------+
-| Placeholder for telemetry record N                      |
+|                 Telemetry record 1                      |
 +---------------------------------------------------------+
           </artwork>
         </figure>
         <t>
-          Notice that all record placeholders are equal size, as prescribed by the telemetry record template.  For efficient hardware implementation, new records are pushed into the stack along each hop.  This allows for telemetry data to be inserted dynamically as the records indicate.  Each record corresponds to a single network element on the path from sender to receiver of the packet.
+          Notice that the first record is at the end of the packet.  For efficient hardware implementation, new records are pushed into the stack along each hop.  This eliminates the need for the transit network elements to inspect the full packet and allows for arbitrarily long packets as the MTU allows.  Each record corresponds to a single record type as reported by a given network element on the path from sender to receiver of the packet.  A given network element may not support all requested record types.  In this event, the network element will push only the records supported.  
         </t>
       </section>
       <section title="Header Format" toc="default">
@@ -117,7 +117,11 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+    
 |                         Probe Marker (2)                      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|Ver Num|Msg Typ|   Hop Limit   | Record Count  | Max Rcrds |S|O|
+|Version Number | Message Type  |O|S|   Zeroes  |    Zeroes     |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|           Hop Limit           |            Hop Count          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|           Max Length          |         Current Length        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                        Sender's Handle                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -135,34 +139,37 @@
             </t>
             <t> The "Message Type" field value could be either "1" - "Probe" or "2" - "Probe Reply"</t>
             <t>
-              "Hop Limit" is defined only for "Message Type" of "1" ("Probe"). For "Probe Reply" the "Hop Limit" field must be set to zero. This field is treated as an integer value and decremented by every network element in the path as "Probe" propagates. See the <xref target="loopback_mode"/> section on the intended use of the field.
-            </t>
-            <t>
               The "Global Flags" field is 8 bits, and defines the following flags:
               <list>
                 <t> 
-                  "Overflow" (O-bit) (least significant bit). This bit is set by the network element if there is no record placeholder available: i.e. the packet is already "full" of telemetry information. 
+                  "Overflow" (O-bit) (least significant bit). This bit is set by the network element if the number of records on the packet is at the maximum limit as specified by the packet: i.e. the packet is already "full" of telemetry information. 
                 </t>
                 <t>
-                  "Sealed" (S-bit). This bit instructs the network element to forward the packet WITHOUT embedding telemetry data, even if it matches the probe identification rules.  This mechanism could be used to send "realistic" probes of arbitrary size after the network path associated with the combination of source/destination IP addresses and ports has been previously established. The network element must not inspect the "Telemetry Record Template" field for "sealed" probes.
+                  "Sealed" (S-bit). This bit instructs the network element to forward the packet WITHOUT embedding telemetry data, even if it matches the probe identification rules.  This mechanism could be used to send "realistic" probes of arbitrary size after the network path associated with the combination of source/destination IP addresses and ports has been previously established. The network element must not inspect the "Telemetry Record Template" field for "Sealed" probes.
                 </t>
               </list>
             </t>
             <t>
+              "Hop Limit" is defined only for "Message Type" of "1" ("Probe"). For "Probe Reply" the "Hop Limit" field must be set to zero. This field is treated as an integer value representing the number of network elements. See the <xref target="loopback_mode"/> section on the intended use of the field.
+            </t>
+            <t>
+              The "Hop Count" field specifies the current number of hops of capable network elements the packet has transit through.  It begins with zero and must be incremented by one for every network element that adds a telemetry record.  Combined with a push mechanism, this simplifies the work for the subsequent network element and the packet receiver.  The subsequent network element just needs to parse the template and then insert new record(s) immediately after the template.  
+            </t>
+            <t>
+              The "Max Length" field specifies the maximum length in record payload.  Given that the sender knows the minimum path MTU, the sender can pre-populate the maximum number of bytes allowed before exceeding the MTU.  This a simple comparison between "Current Length" and "Max Length" to decide whether or not an overflow has occurred.
+            </t>
+            <t>
+              The "Current Length" field specifies the current length of records stored in packet.  Given that network elements may not necessarily populate the full set of records and record types may have different lengths, each network element will need to increment this field by the number of records added.  This allows transit network elements to ensure MTU is not violated by checking against "Max Length".
+	    </t>
+            <t>
               The "Sender's Handle" field is set by the sender to allow the receiver to identify a particular originator of probe packets. Along with "Sequence Number" it allows for tracking of packet order and loss within the network.
             </t>
-            <t>
-              The "Record Count" field specifies the number of telemetry records currently in the stack of the probe packet body. It begins with zero and must be incremented after every network element adds a telemetry record.  Combined with a push mechanism, this simplifies the work for the subsequent network element and the packet receiver.  The subsequent network element just needs to parse the template and then insert a new record immediately after the template while the probe packet receiver can look at the Record Count field to parse the Telemetry Records.
-            </t>
-            <t>
-              The "Max Records" field specifies the maximum number of telemetry records allowed in a given packet.  Given that the sender knows the minimum path MTU, the sender can pre-populate the maximum number of records allowed before exceeding the MTU.  This eases hardware implementation to be based on a comparison between "Record Count" and "Max Records" to decide whether or not an overflow has occurred.
-            </t>
-          </list>
+        </list>
         </t>
       </section>    
       <section title="Telemetry Record Template" toc="default">
         <t>
-          The following figure defines the "Record Template".  This template uses type-length fields to describe the telemetry data records as added by network elements. The most significant bit in the "Type" field must be set to zero.
+          The following figure defines the "Record Template".  This template uses type-length fields to describe the telemetry data records as added by network elements. The most significant bit in the "Type" field must be set to zero.  Note that the record list is expected to always begin with Type = 1 (Device ID) to act as a delimiter and be ordered from lowest to highest by "Record Type".  That is, any network element can always expect to see Type = 1 (Device ID) as the first record type requested, and to always be be placed before Type = 10 (Timestamp) or Type = 21 (IPv4 Route), if requested.  
         </t>
           <figure title="Record Template" anchor="record_template" suppress-title="false" align="left" alt="" width="" height="">
             <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
@@ -171,32 +178,43 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
 |      TL record count (N)      |          Must Be Zero         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+   
-|0|           Type 1            |            Length 1           |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|0|           Type 2            |            Length 2           |
+|      Type 1       |   Len 1   |      Type 2       |   Len 2   |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 .                                                               .
 .                                                               .
 .                                                               .
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|0|           Type N            |           Length N            |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+          
+|     Type N-1      |  Len N-1  |      Type N       |   Len N   |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
             </artwork>
           </figure> 
+	<t>
+	 <list style="format (%d)">
+		<t>
+		  "TL record count" reflects the total number of types requested.
+		</t>
+		<t> 
+                  The "Type" field identifies the record type.  The network element inserts telemetry records in sequence according to the sequence of record types specified. 
+                </t>
+                <t>
+                  "Length" field. The length field specifies the size of the corresponding record type.  Each record is expected to be word aligned to the header.
+                </t>
+	 </list>
+	</t>
       </section>
       <section title="Telemetry Record">
         <t>
-          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record as defined in the "Record Template" to the probe packet. The new record must be inserted after the "Record Template", with the "Record Count" subsequenly incremented by one. The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet. The most significant bit in the type field ("S-bit") must be set to "1" if the network element was able to understand and record the requested telemetry type. That bit must be set to zero otherwise, along with the contents of the "Value" field. The length field is the TLV field length including the "Type" and "Length" fields.
+          This section defines the structure of a telemetry record. Every network element capable of reporting inband telemetry data must add a record as defined in the "Record Template" to the probe packet. The new record(s) must be inserted after the "Record Template", with the "Record Count" and "Current Length" incremented accordingly. The order of TLV elements must follow the order prescribed by the <xref target="record_template"/> portion of the probe packet.  The length field is the TLV field length in 32-bit words including the "Type" and "Length" fields.
         </t>
         <t>
-          If inserting a new telemetry record would cause "Record Count" to exceed "Max Records", no record is added and the overflow "O-bit" must be set to "1" in the probe header.
+          If inserting a new telemetry record would cause "Current Length" to exceed "Max Length", no record is added and the overflow "O-bit" must be set to "1" in the probe header.
         </t>
         <figure title="Telemetry Record Format" anchor="telemetry_record" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">        
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|           Type 1            |           Length 1            |
+|      Type 1       |   Len 1   |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 .                                                               .
@@ -204,7 +222,7 @@
 .                                                               .
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|           Type 2            |            Length 2           |
+|      Type 2       |   Len 2   |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 .                                                               .
@@ -216,7 +234,7 @@
 .                                                               .
 .                                                               .
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|           Type N            |             Length N          |
+|      Type N       |   Len N   |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 .                                                               .
@@ -234,14 +252,14 @@
       </t>
       <section title="Device Identifier">
         <t>
-          This is used to identify the device reporting telemetry information. This document does not prescribe any specific identifier format.
+          This is used to identify the device reporting telemetry information. This document does not prescribe any specific identifier format.  As mentiontioned in <xref target="record_template"/>, the device identifier template is expected to always be present to act as a delimiter to identify records from different network elements.
         </t>
         <figure title="Device Identifier" anchor="device_id" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 1 (Device ID)      |           Length =  12        |
+| Type = 1 (Dev ID) |  Len = 12 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                           Device ID (1)                       |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -252,14 +270,14 @@
       </section>
       <section title="Timestamp">
         <t>
-          This telemetry record encodes the time data associated with the packet. Most existing hardware support timestamping for IEEE1588.  To simplify implementation, packet receive time is stored similarly as 48-bits of seconds, 32-bits of nanoseconds, and residence time is in 48-bits of nanoseconds.
+          This telemetry record encodes the time data associated with the packet. Most existing hardware support timestamping for IEEE1588.  To leverage existing hardware capabilities, packet receive time is stored similarly as 48-bits of seconds, 32-bits of nanoseconds, and residence time is in 48-bits of nanoseconds.
         </t>
         <figure title="Timestamp" anchor="time_stamp" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 10 (Timestamp)     |           Length =  20        |
+|   Type = 10 (TS)  |  Len = 20 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                    Receive Seconds [47:16]                    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -274,14 +292,14 @@
       </section>
       <section title="Queueing Delay">
         <t>
-          Encodes the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. In case of the cut-through switching operation this must be set to zero.
+          This record encodes the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. In case of the cut-through switching operation this must be set to zero.
         </t>
         <figure title="Queueing Delay" anchor="queueing_delay" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|  Type = 11 (Queueing Delay) |           Length =  12        |
+|   Type = 11 (QD)  |  Len = 12 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                            Seconds                            |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -299,11 +317,11 @@
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 12 (Port IDs)      |           Length =  12        |
+|Type = 12 (Port ID)|  Len = 12 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                        Ingress Port ID                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Egress Port ID                        |
+|                        Egress Port ID                         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+           
           </artwork>
         </figure>
@@ -314,14 +332,14 @@
         </t>
         <section title="IPv6 Route">
           <t>
-            This record stores the IPv6 route that has been used for packet forwarding. If not used, then S-bit is set to zero, along with the value field.
+            This record stores the IPv6 route that has been used for packet forwarding.
           </t>
           <figure title="IPv6 Route" anchor="forwarding_information_ipv6_route" suppress-title="false" align="left" alt="" width="" height="">
             <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 20 (IPv6 Route)    |           Length =  24        |
+|Type = 20 (v6 Route|  Len = 24 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |      ECMP group size    |  ECMP group index   | Prefix Length |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -338,14 +356,14 @@
         </section>
         <section title="IPv4 Route">
           <t>
-            This record stores the IPv4 route that has been used for packet forwarding. If not used, then S-bit is set to zero, along with the value field.
+            This record stores the IPv4 route that has been used for packet forwarding. 
           </t>
           <figure title="IPv4 Route" anchor="forwarding_information_ipv4_route" suppress-title="false" align="left" alt="" width="" height="">
             <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 21 (IPv4 Route)    |           Length =  12        |
+|Type = 21 (v4 Route|  Len = 12 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |     ECMP group size   |  ECMP group index     | Prefix Length | 
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -363,7 +381,7 @@
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|S|   Type = 22 (MPLS Route)    |           Length =  16        |
+|  Type = 22 (MPLS) |  Len = 16 |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |   Operation   |      ECMP group size    |  ECMP group index   |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -385,10 +403,10 @@
     </section>
     <section title="Operating in loopback mode" anchor="loopback_mode" toc="default">
       <t>
-        In "loopback" mode the flow of probes is "turned back" at a given network element. The network element that "turns" packets around is identified using the "Hop Limit" field. The network element that receives a "Probe" type packet having "Hop Limit" value of "1" is required to perform the following:
+        In "loopback" mode the flow of probes is "turned back" at a given network element. The network element that "turns" packets around is identified using the "Hop Limit" field. The network element that receives a "Probe" type packet having "Hop Limit" value equal to "Hop Count" is required to perform the following:
         <list>
           <t>
-            Change the "Message Type" field to "Probe Reply" and set the "Hop Limit" to zero.
+            Change the "Message Type" field to "Probe Reply".
           </t>
           <t>
             Swap the destination/source addresses and port values in the IP/UDP headers of the probe packet.
@@ -399,7 +417,7 @@
         </list>
       </t>
       <t>
-        This way, the original probe is routed back to originator. Notice that the return path may be different from the path that the original probe has taken. This path will be recorded by the network elements as the reply is transported back to the sender. Using this technique one may progressively test a path until its breaking point. Unlike the traditional traceroute utility, however, the returning packets are the original probes, not the ICMP messages.
+        This way, the original probe is routed back to originator. Notice that the return path may be different from the path that the original probe has taken. This path will be recorded by the network elements as the reply is transported back to the sender. Using this technique one may progressively test a path until its breaking point. Unlike the traditional traceroute utility, however, the returning packets are the original probes, not the ICMP messages. As records are pushed in chronological order, where the most recent records are at the front of the packet, the analyzer can extract the last set of records associated with the first hops up to the "Hop Limit" by identifying the "Record Type" = 1.  Any records prior to the "Hop Limit" hop are then considered telemetry of the return path.  
       </t>
     </section>    
     <section title="Processing Probe Packet" toc="default">
