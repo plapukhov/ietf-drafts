@@ -79,22 +79,22 @@
       </section>    
       <section title="Probe structure" toc="default">
         <t>
-         The probe consists of a fixed-size "Header" and arbitrary number of variable-length "telemetry data frames" following the header. For example, those could be encapsulated within the payload of a UDP packet. Each frame, in turn, consists of multiple "telemetry record" fields defined below in this document. The records are added per the request of the information specified in the header.
+         The probe consists of a fixed-size "Header" and arbitrary number of variable-length "telemetry data frames" following the header. For example, those could be encapsulated within the payload of a UDP packet. Frames are variable length, and each frame, in turn, consists of multiple "telemetry record" fields defined below in this document. The records are added per the request of the information specified in the header.
        </t>
         <figure title="Probe layout" anchor="probe_layout" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
 +---------------------------------------------------------+
-|                    Header                               |
+|                       Header                            |
 +---------------------------------------------------------+
-|              Telemetry data frame N                     |
+|                Telemetry data frame N                   |
 +---------------------------------------------------------+
-|              Telemetry data frame N-1                   |
+|                Telemetry data frame N-1                 |
 +---------------------------------------------------------+
 .                                                         .
 .                                                         .
 .                                                         .
 +---------------------------------------------------------+
-|              Telemetry data frame 1                     |
+|                Telemetry data frame 1                   |
 +---------------------------------------------------------+
           </artwork>
         </figure>
@@ -115,7 +115,7 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+    
 |                         Probe Marker (2)                      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|Version Number | Message Type  |             Flags             |
+|   Version     | Message Type  |             Flags             |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                     Telemetry Request Vector                  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -156,19 +156,19 @@
               "Telemetry Request Vector" is a 64-bit long field that requests well-known inband telemetry information from the network elements on the path. A bit set in this vector translates to a request of a particular type of information. The following types/bits are currently defined, starting with the least significant bit first:
               <list>
                 <t>
-                  Bit 0: Device identifier
+                  Bit 0: Device identifier.
                 </t>
                 <t>
-                  Bit 1: Timestamp
+                  Bit 1: Timestamp.
                 </t>              
                 <t>
-                  Bit 2: Queueing delay
+                  Bit 2: Queueing delay.
                 </t>  
                 <t>
-                  Bit 3: Ingress/Egress port identifiers
+                  Bit 3: Ingress/Egress port identifiers.
                 </t>
                 <t>
-                  Bit 63: Opaques state snapshot request. 
+                  Bit 63: Opaque state snapshot request. 
                 </t>
               </list>
             </t>
@@ -190,12 +190,9 @@
         </list>
         </t>
       </section>    
-      <section title="Telemetry Frame and Telemtry Records">
+      <section title="Telemetry Data Frame and Telemetry Data Records">
         <t>
-          Each telemetry frame is constructed by adding multiple telemetry records, per the request in "Telemetry request vector" fields of the telemetry probe header. The frame starts with a 16-bit length field, which reflects the frame size in bytes, excluding the length of the field itself. Each telemetry record inside the frame is structured as a TLV record, where Type and Length are 8-bit fields, and the Length reflects the size of the telemetry record excluding the two fields themselves.
-        </t>
-        <t>
-          It is possible that a device may not be capable of inserting all requested types of telemetry data. In this case, the corresponding TLV could be skipped. Ordering of TLV fields in the frame is arbitrary.
+          Each telemetry data frame is constructed by concatenating multiple telemetry data record, per the request in "Telemetry request vector" fields of the dataplane probe header. The frame starts with a 16-bit length field, which reflects the frame size in bytes, excluding the length of the field itself. The body of the frame is constructed by appending a fixed-size frame for every bit set in "Telemetry Request Vector". All of the records, except the one requested by 62-nd bit ("Opaque State Snapshot") are fixed size, with their lengths defined in <xref target="telemetry_record_types"/>. If a record is requested, but could not be provided, the corresponding space must be filled with zeroes. The order of the records in the frame follows the order of the bits in the request vector. Finally, if requested, a variable-length field is appended at the end of the frame, with the length field occupying the first 8 bits. This "length" field should reflect the length of the opaque data excluding the length field itself.
         </t>
         <t>
           If inserting a new telemetry record would cause "Current Length" to exceed "Max Length", no record is added and the overflow "O-bit" must be set to "1" in the probe header.
@@ -205,61 +202,71 @@
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|            Length             |         Must be Zero          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|      Type 1   |      Len 1    |         Must Be Zero          |
+|         Frame  Length         |         Must be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
+.                      Fixed Size Field 0                       .
+.                        (if requested)                         .
 .                                                               .
-.                            Value 1                            .
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+.                      Fixed Size Field 1                       .
+.                        (if requested)                         .
+.                                                               .
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+.                                                               .
 .                                                               .
 ~                                                               ~
+.                                                               .
+.                                                               .
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+.                      Fixed Size Field 62                      .
+.                        (if requested)                         .
+.                                                               .
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|      Type N   |      Len N    |         Must Be Zero          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Length    |                                               |
++-+-+-+-+-+-+-+-+                                               +
 |                                                               |
-.                                                               .
-.                             Value N                           .
-.                                                               .
+.                   Opaque State Snapshot                       .
+.                       (if requested)                          .
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+          
           </artwork>
         </figure>
       </section>
     </section>
-    <section title="Telemetry Record Types" toc="default">
+    <section title="Telemetry Record Types" toc="default" anchor="telemetry_record_types">
       <t>
         This section defines some of the telemetry record types that could be supported by the network elements. 
       </t>
       <section title="Device Identifier">
         <t>
-          This is used to identify the device reporting telemetry information. This document does not prescribe any specific identifier format. In general, it is expected to be configured by the operator.
+          This record is used to identify the device reporting telemetry information. This document does not prescribe any specific identifier format. In general, it is expected to be configured by the operator. The length of this field is 64-bit.
         </t>
         <figure title="Device Identifier" anchor="device_id" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| Type = 1      |   Len = 10    |         Must Be Zero          |
+|                        Device ID (1)                          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                           Device ID (1)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                           Device ID (2)                       |
+|                        Device ID (2)                          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
           </artwork>
         </figure>
       </section>
       <section title="Timestamp">
         <t>
-          This telemetry record encodes the time data associated with the packet. Most existing hardware support timestamping for IEEE1588.  To leverage existing hardware capabilities, packet receive time is stored similarly as 48-bits of seconds, 32-bits of nanoseconds, and residence time is in 48-bits of nanoseconds.
+          This telemetry record encodes the time data associated with the packet. Most existing hardware support timestamping for IEEE1588.  To leverage existing hardware capabilities, packet receive time is stored similarly as 48-bits of seconds, 32-bits of nanoseconds, and residence time is in 48-bits of nanoseconds. The length of this field is 128 bits.
         </t>
         <figure title="Timestamp" anchor="time_stamp" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   Type = 2    |    Len = 18   |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                    Receive Seconds [47:16]                    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -274,14 +281,12 @@
       </section>
       <section title="Queueing Delay">
         <t>
-          This record encodes the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. In case of the cut-through switching operation this must be set to zero.
+          This record encodes the amount of time that the frame has spent queued in the network element. This is only recorded if packet has been queued, and defines the time spent in memory buffers. This could be helpful to detect queueing-related delays in the network. In case of the cut-through switching operation this must be set to zero. The length of this field is 64 bits.
         </t>
         <figure title="Queueing Delay" anchor="queueing_delay" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   Type = 3    |    Len = 10   |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                            Seconds                            |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -292,14 +297,12 @@
       </section> 
       <section title="Ingress/Egress Port IDs">
         <t>
-          This record stores the ingress and egress physical ports used to receive and send packet respectively. Here, "physical port" means a unit with actual MAC and PHY devices associated - not any logical subdivision based, for example, on protocol level tags (e.g. VLAN). The port identifiers are opaque, and defined as 32-bit entries. For example, those could be the corresponding SNMP ifIndex values.
+          This record stores the ingress and egress physical ports used to receive and send packet respectively. Here, "physical port" means a unit with actual MAC and PHY devices associated - not any logical subdivision based, for example, on protocol level tags (e.g. VLAN). The port identifiers are opaque, and defined as 32-bit entries. For example, those could be the corresponding SNMP ifIndex values. The length of this field is 64 bits.
         </t>
         <figure title="Ingress/Egress Port IDs" anchor="ingress_egress_ports" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   Type = 4    |   Len = 10    |         Must Be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                        Ingress Port ID                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -310,16 +313,14 @@
       </section> 
       <section title="Opaque State Snapshot">
         <t>
-          This record has variable size. It allows the network element to store arbitrary state in the probe, without a pre-defined schema. The schema needs to made known to the analyzer by some out-of-band means. The 32-bit "Schema Id" field in the record is supposed to let the analyzer know which particular schema to use, and it is expected to be configured on the network element by the operator. This ID is expected to be configured on the device by the network operator. 
+          This record has variable size. It allows the network element to store arbitrary state in the probe, without a pre-defined schema. The schema needs to made known to the analyzer by some out-of-band means. The 24-bit "Schema Id" field in the record is supposed to let the analyzer know which particular schema to use, and it is expected to be configured on the network element by the operator. This ID is expected to be configured on the device by the network operator. 
         </t>
         <figure title="Opaque State" anchor="opaque_state" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   Type = 64   |    Length     |         Must Be Zero          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                           Schema Id                           |
+|   Length      |               Schema Id                       |          
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 |                                                               |
