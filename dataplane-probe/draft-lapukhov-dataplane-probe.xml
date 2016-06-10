@@ -74,12 +74,12 @@
       </t>
       <section title="Probe transport" toc="default">
         <t>
-          This document does not prescribe any specific format of a data-plane probe. For example, the probe could be embedded inside a UDP packet, or with an IPv6 extension header.
+          This document does not prescribe any specific encapsulation for the data-plane probe. For example, the probe could be embedded inside a UDP packet, or within an IPv6 extension header.
         </t>
       </section>    
       <section title="Probe structure" toc="default">
         <t>
-         The probe consists of a fixed-size "Header" and arbitrary number of variable-length "telemetry data frames" following the header. For example, those could be encapsulated within the payload of a UDP packet. Frames are variable length, and each frame, in turn, consists of multiple "telemetry record" fields defined below in this document. The records are added per the request of the information specified in the header.
+         The probe consists of a fixed-size "Header" and arbitrary number of variable-length "telemetry data frames" following the header. Frames are variable length, and each frame, in turn, consists of multiple "telemetry record" fields defined below in this document. The records are added per the request of the telemetry information specified in the header.
        </t>
         <figure title="Probe layout" anchor="probe_layout" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
@@ -104,7 +104,7 @@
       </section>
       <section title="Header Format" toc="default">
         <t>
-          The probe payload starts with a fixed-size header. The header identifies the packet as a probe packet, and encodes basic information shared by all telemetry records. 
+          The probe payload starts with a fixed-size header. The header identifies the packet as a data-plane probe packet, and encodes basic information shared by all telemetry records. 
         </t>
         <figure title="Header Format" anchor="header_format" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height="">  
@@ -119,7 +119,9 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                     Telemetry Request Vector                  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   Hop Limit   |   Hop Count   |  Max Length   | Current Length|
+|   Hop Limit   |   Hop Count   |         Must Be Zero          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|         Maximum Length        |        Current Length         |               
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |        Sender's Handle        |        Sequence Number        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -173,7 +175,7 @@
               The "Hop Count" field specifies the current number of hops of capable network elements the packet has transit through.  It begins with zero and must be incremented by one for every network element that adds a telemetry record.  Combined with a push mechanism, this simplifies the work for the subsequent network element and the packet receiver.  The subsequent network element just needs to parse the template and then insert new record(s) immediately after the template.  
             </t>
             <t>
-              The "Max Length" field specifies the maximum length in record payload.  Given that the sender knows the minimum path MTU, the sender can set the maximum number of bytes allowed before exceeding the MTU. Thus, a simple comparison between "Current Length" and "Max Length" allows to decide whether or not an overflow has occurred.
+              The "Max Length" field specifies the maximum length of the telemetry payload in bytes. Given that the sender knows the minimum path MTU, the sender can set the maximum of payload bytes allowed before exceeding the MTU. Thus, a simple comparison between "Current Length" and "Max Length" allows to decide whether or not data could be added.
             </t>
             <t>
               The "Current Length" field specifies the current length of data stored in the probe.  This field is incremented by eacn network element by the number of bytes it has added with the telemetry data frame. 
@@ -186,7 +188,7 @@
       </section>    
       <section title="Telemetry Data Frame and Telemetry Data Records">
         <t>
-          Each telemetry data frame is constructed by concatenating multiple telemetry data record, per the request in "Telemetry Request Vector" fields of the dataplane probe header. The frame starts with a 16-bit length field, which reflects the frame size in bytes, excluding the length of the field itself. Following the "Frame Length" field is a "Telemetry Frame Vector".  This vector corresponds to the records the network element is capable of responding to.  The body of the frame is constructed by appending fixed-size records corresponding to every bit set in "Telemetry Frame Vector". All of the records, except the one requested by 31st bit ("Opaque State Snapshot") are fixed size, with their lengths defined in <xref target="telemetry_record_types"/>. The order of the records in the frame follows the order of the bits in the request vector. Finally, if requested, a variable-length field is appended at the end of the frame, with the length field occupying the first 8 bits. This "length" field reflects the length of the opaque data excluding the length field itself.
+          Each telemetry data frame is constructed by concatenating multiple telemetry data record, per the request in "Telemetry Request Vector" fields of the dataplane probe header. The frame starts with a 16-bit length field, which reflects the frame size in bytes, excluding the length of the field itself. Following the "Frame Length" field is a "Telemetry Response Vector" field: this vector corresponds to the records the network element was capable of recording in the frame.  The body of the frame is constructed by appending fixed-size records corresponding to every bit set in "Telemetry Response Vector". All of the records, except the one requested by 31st bit ("Opaque State Snapshot") are fixed size, with their lengths defined in <xref target="telemetry_record_types"/>. The order of the records in the frame follows the order of the bits in the "Telemetry Request Vector" (also reflected in "Telemetry Response Vector"). Finally, if requested, a variable-length field is appended at the end of the frame, with the length field occupying the first 8 bits. This "length" field reflects the length of the opaque data excluding the length field itself.
         </t>
         <t>
           If inserting a new telemetry record would cause "Current Length" to exceed "Max Length", no record is added and the overflow "O-bit" must be set to "1" in the probe header.
@@ -198,7 +200,7 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |         Frame  Length         |         Must be Zero          |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     Telemetry Frame Vector                    |
+|                  Telemetry Response Vector                    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 .                      Fixed Size Field 0                       .
@@ -303,14 +305,14 @@
       </section> 
       <section title="Opaque State Snapshot">
         <t>
-          This record has variable size. It allows the network element to store arbitrary state in the probe, without a pre-defined schema. The schema needs to made known to the analyzer by some out-of-band means. The 24-bit "Schema Id" field in the record is supposed to let the analyzer know which particular schema to use, and it is expected to be configured on the network element by the operator. This ID is expected to be configured on the device by the network operator. 
+          This record has variable size. It allows the network element to store arbitrary state in the probe, without a pre-defined schema. The schema needs to made known to the analyzer by some out-of-band means. The 16-bit "Schema Id" field in the record is supposed to let the analyzer know which particular schema to use, and it is expected to be configured on the network element by the operator. This ID is expected to be configured on the device by the network operator. 
         </t>
         <figure title="Opaque State" anchor="opaque_state" suppress-title="false" align="left" alt="" width="" height="">
           <artwork xml:space="preserve" name="" type="" align="left" alt="" width="" height=""> 
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|     Length    |               Schema Id                       |          
+|     Length                    |         Schema Id             |          
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 |                                                               |
